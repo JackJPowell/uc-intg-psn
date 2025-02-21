@@ -82,17 +82,17 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
     for entity_id in entity_ids:
         psn_id = entity_id
         if psn_id in _configured_accounts:
-            psn = _configured_accounts[psn_id]
-            _LOG.info("Add '%s' to configured devices and connect", psn.name)
-            if psn.is_on is None:
+            playstation = _configured_accounts[psn_id]
+            _LOG.info("Add '%s' to configured devices and connect", playstation.name)
+            if playstation.is_on is None:
                 state = media_player.States.UNAVAILABLE
             else:
                 # TODO Improve State
-                state = media_player.States.ON if psn.is_on else media_player.States.OFF
+                state = media_player.States.ON if playstation.is_on else media_player.States.OFF
             api.configured_entities.update_attributes(
                 entity_id, {media_player.Attributes.STATE: state}
             )
-            await psn.connect()
+            await playstation.connect()
             continue
 
         device = config.devices.get(psn_id)
@@ -122,6 +122,7 @@ async def on_unsubscribe_entities(entity_ids: list[str]) -> None:
 async def media_player_cmd_handler(
     entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None
 ) -> ucapi.StatusCodes:
+    """Handle media player events"""
     _LOG.info(
         "Got %s command request: %s %s", entity.id, cmd_id, params if params else ""
     )
@@ -223,24 +224,24 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
             api.available_entities.update_attributes(entity_id, attributes)
 
 
-def _add_configured_psn(device: config.PSNDevice, connect: bool = True) -> None:
+def _add_configured_psn(device: config.PSNDevice) -> None:
     # the device should not yet be configured, but better be safe
     if device.identifier in _configured_accounts:
-        PSN = _configured_accounts[device.identifier]
-        _LOOP.create_task(PSN.disconnect())
+        playstation = _configured_accounts[device.identifier]
+        _LOOP.create_task(playstation.disconnect())
     else:
         _LOG.debug(
             "Adding new PSN device: %s (%s)",
             device.name,
             device.identifier,
         )
-        PSN = PSNAccount(device, loop=_LOOP)
-        PSN.events.on(psn.EVENTS.CONNECTED, on_psn_connected)
-        PSN.events.on(psn.EVENTS.DISCONNECTED, on_psn_disconnected)
-        PSN.events.on(psn.EVENTS.ERROR, on_psn_connection_error)
-        PSN.events.on(psn.EVENTS.UPDATE, on_psn_update)
+        playstation = PSNAccount(device, loop=_LOOP)
+        playstation.events.on(psn.EVENTS.CONNECTED, on_psn_connected)
+        playstation.events.on(psn.EVENTS.DISCONNECTED, on_psn_disconnected)
+        playstation.events.on(psn.EVENTS.ERROR, on_psn_connection_error)
+        playstation.events.on(psn.EVENTS.UPDATE, on_psn_update)
 
-        _configured_accounts[device.identifier] = PSN
+        _configured_accounts[device.identifier] = playstation
 
     _register_available_entities(device.identifier, device.name)
 
@@ -284,7 +285,7 @@ def _register_available_entities(identifier: str, name: str) -> bool:
 def on_device_added(device: config.PSNDevice) -> None:
     """Handle a newly added device in the configuration."""
     _LOG.debug("New device added: %s", device)
-    _add_configured_psn(device, connect=False)
+    _add_configured_psn(device)
 
 
 def on_device_removed(device: config.PSNDevice | None) -> None:

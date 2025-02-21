@@ -163,6 +163,7 @@ class PSNAccount:
             _LOG.debug("[%s] Polling was already stopped", self.log_id)
 
     def update_attributes(self) -> None:
+        """Update media player attributes and forward ws message"""        
         _LOG.debug("[%s] Process update", self.log_id)
 
         update = {}

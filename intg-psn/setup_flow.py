@@ -51,7 +51,9 @@ _user_input_discovery = RequestUserInput(
                 "label": {
                     "value": {
                         "en": (
-                            "Your NPSSO Token is required to authenticate to the PlayStation Network. \n\nPlease signin to the [Playstation Network](https://playstation.com) first. Then [click here](https://ca.account.sony.com/api/v1/ssocookie) to retrieve your token."
+                            "Your NPSSO Token is required to authenticate to the PlayStation Network. \
+                            \n\nPlease signin to the [Playstation Network](https://playstation.com) first. \
+                            Then [click here](https://ca.account.sony.com/api/v1/ssocookie) to retrieve your token."
                         ),
                     }
                 }
@@ -79,7 +81,6 @@ async def driver_setup_handler(msg: SetupDriver) -> SetupAction:  # pylint: disa
     """
     global _setup_step
     global _cfg_add_device
-    global _pairing_apple_tv
 
     if isinstance(msg, DriverSetupRequest):
         _setup_step = SetupSteps.INIT
@@ -268,7 +269,6 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
     :param msg: response data from the requested user data
     :return: the setup action on how to continue
     """
-    global _setup_step
 
     npsso = PlaystationNetwork.parse_npsso_token(msg.input_values["npsso"])
 
