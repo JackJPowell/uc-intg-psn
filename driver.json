@@ -30,7 +30,7 @@
 				"field": {
 					"label": {
 						"value": {
-							"en": "The integration will communicate with the PlayStation Network API to retrieve your current game session details"
+							"en": "This integration communicates with the PlayStation Network to retrieve your current game session details."
 						}
 					}
 				}

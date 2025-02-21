@@ -18,9 +18,7 @@ from typing import (
 
 from psnawp_api.psn import PlaystationNetwork, PlaystationNetworkData
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
-from psnawp_api.models.user import User
 from config import PSNDevice
-from ucapi.media_player import Attributes as MediaAttr
 
 from pyee.asyncio import AsyncIOEventEmitter
 
@@ -116,8 +114,16 @@ class PSNAccount:
 
         self.events.emit(EVENTS.CONNECTING, self._device.identifier)
 
-        self._psn = PlaystationNetwork(self._device.npsso2)
-        self._psn_data = self._psn.get_data()
+        try:
+            self._psn = PlaystationNetwork(self._device.npsso)
+            self._psn_data = self._psn.get_data()
+        except PSNAWPAuthenticationError as ex:
+            _LOG.error(
+                "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
+            )
+            self.events.emit(EVENTS.ERROR, self._device.identifier)
+            return
+
         self.events.emit(EVENTS.CONNECTED, self._device.identifier)
         _LOG.debug("[%s] Connected", self.log_id)
         self.update_attributes()
@@ -132,7 +138,6 @@ class PSNAccount:
         try:
             if self._psn:
                 self._psn = None
-            self.events.emit(EVENTS.DISCONNECTED, self._device.identifier)
         except Exception as err:  # pylint: disable=broad-exception-caught
             _LOG.exception(
                 "[%s] An error occurred while disconnecting: %s", self.log_id, err
@@ -162,7 +167,7 @@ class PSNAccount:
 
         update = {}
         if not self._psn:
-            self._psn = PlaystationNetwork(self._device.npsso2)
+            self._psn = PlaystationNetwork(self._device.npsso)
         self._psn_data = self._psn.get_data()
 
         update["state"] = "OFF"

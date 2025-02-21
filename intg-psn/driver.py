@@ -150,7 +150,7 @@ async def on_psn_disconnected(identifier: str) -> None:
     """Handle PSN disconnection."""
     _LOG.debug("PSN disconnected: %s", identifier)
     api.configured_entities.update_attributes(
-        identifier, {media_player.Attributes.STATE: media_player.States.UNAVAILABLE}
+        identifier, {media_player.Attributes.STATE: media_player.States.OFF}
     )
 
 
@@ -208,13 +208,10 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
         attributes[media_player.Attributes.MEDIA_TITLE] = update["title"]
     if "artist" in update:
         attributes[media_player.Attributes.MEDIA_ARTIST] = update["artist"]
-    if "album" in update:
-        attributes[media_player.Attributes.MEDIA_ALBUM] = update["album"]
 
     if media_player.Attributes.STATE in attributes:
         if attributes[media_player.Attributes.STATE] == media_player.States.OFF:
             attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
-            attributes[media_player.Attributes.MEDIA_ALBUM] = ""
             attributes[media_player.Attributes.MEDIA_ARTIST] = ""
             attributes[media_player.Attributes.MEDIA_TITLE] = ""
             attributes[media_player.Attributes.MEDIA_DURATION] = 0
@@ -261,7 +258,6 @@ def _register_available_entities(identifier: str, name: str) -> bool:
     features = [
         media_player.Features.MEDIA_TITLE,
         media_player.Features.MEDIA_ARTIST,
-        media_player.Features.MEDIA_ALBUM,
         media_player.Features.MEDIA_IMAGE_URL,
     ]
 
@@ -274,7 +270,6 @@ def _register_available_entities(identifier: str, name: str) -> bool:
             media_player.Attributes.MEDIA_IMAGE_URL: "",
             media_player.Attributes.MEDIA_TITLE: "",
             media_player.Attributes.MEDIA_ARTIST: "",
-            media_player.Attributes.MEDIA_ALBUM: "",
         },
         device_class=media_player.DeviceClasses.TV,
         options={},

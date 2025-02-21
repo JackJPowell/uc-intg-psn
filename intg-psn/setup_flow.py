@@ -45,13 +45,13 @@ _user_input_discovery = RequestUserInput(
         {
             "id": "info",
             "label": {
-                "en": "Your NPSSO2 Token is required to authenticate to the PlayStation Network API. Please sign into the Playstation Network in your browser and then navigate to this url: https://ca.account.sony.com/api/v1/ssocookie",
+                "en": "Supply your NPSSO Token",
             },
             "field": {
                 "label": {
                     "value": {
                         "en": (
-                            "Copy the value from the link and paste it below"
+                            "Your NPSSO Token is required to authenticate to the PlayStation Network. \n\nPlease signin to the [Playstation Network](https://playstation.com) first. Then [click here](https://ca.account.sony.com/api/v1/ssocookie) to retrieve your token."
                         ),
                     }
                 }
@@ -59,9 +59,9 @@ _user_input_discovery = RequestUserInput(
         },
         {
             "field": {"text": {"value": ""}},
-            "id": "npsso2",
+            "id": "npsso",
             "label": {
-                "en": "NPSSO2 Token",
+                "en": "NPSSO Token",
             },
         },
     ],
@@ -93,7 +93,7 @@ async def driver_setup_handler(msg: SetupDriver) -> SetupAction:  # pylint: disa
             and "action" in msg.input_values
         ):
             return await _handle_configuration_mode(msg)
-        if _setup_step == SetupSteps.DISCOVER and "npsso2" in msg.input_values:
+        if _setup_step == SetupSteps.DISCOVER and "npsso" in msg.input_values:
             return await _handle_discovery(msg)
         _LOG.error("No or invalid user response was received: %s", msg)
     elif isinstance(msg, AbortDriverSetup):
@@ -137,9 +137,7 @@ async def _handle_driver_setup(
             {
                 "id": "add",
                 "label": {
-                    "en": "Add a new device",
-                    "de": "Neues Gerät hinzufügen",
-                    "fr": "Ajouter un nouvel appareil",
+                    "en": "Add a new PSN Account",
                 },
             },
         ]
@@ -148,11 +146,17 @@ async def _handle_driver_setup(
         if dropdown_devices:
             dropdown_actions.append(
                 {
+                    "id": "npsso",
+                    "label": {
+                        "en": "Update NPSSO Token for selected PSN Account",
+                    },
+                },
+            )
+            dropdown_actions.append(
+                {
                     "id": "remove",
                     "label": {
-                        "en": "Delete selected device",
-                        "de": "Selektiertes Gerät löschen",
-                        "fr": "Supprimer l'appareil sélectionné",
+                        "en": "Delete selected PSN Account",
                     },
                 },
             )
@@ -233,6 +237,13 @@ async def _handle_configuration_mode(
     match action:
         case "add":
             _cfg_add_device = True
+        case "npsso":
+            choice = msg.input_values["choice"]
+            if not config.devices.remove(choice):
+                _LOG.warning("Could not remove device from configuration: %s", choice)
+                return SetupError(error_type=IntegrationSetupError.OTHER)
+            _setup_step = SetupSteps.DISCOVER
+            return _user_input_discovery
         case "remove":
             choice = msg.input_values["choice"]
             if not config.devices.remove(choice):
@@ -259,12 +270,12 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
     """
     global _setup_step
 
-    npsso2 = PlaystationNetwork.parse_npsso_token(msg.input_values["npsso2"])
+    npsso = PlaystationNetwork.parse_npsso_token(msg.input_values["npsso"])
 
-    if npsso2:
+    if npsso:
         _LOG.debug("Connecting to PSN API")
 
-        psnawp = PlaystationNetwork(npsso2)
+        psnawp = PlaystationNetwork(npsso)
         user = psnawp.get_user()
         _LOG.info("Account: %s", user.online_id)
 
@@ -273,7 +284,7 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
         _LOG.info("Skipping found device %s: already configured", user.online_id)
         return SetupError(error_type=IntegrationSetupError.OTHER)
 
-    device = PSNDevice(user.account_id, user.online_id, npsso2)
+    device = PSNDevice(user.account_id, user.online_id, npsso)
     config.devices.add_or_update(device)
 
     await asyncio.sleep(1)

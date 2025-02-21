@@ -19,13 +19,13 @@ _CFG_FILENAME = "config.json"
 
 @dataclass
 class PSNDevice:
-    """Apple TV device configuration."""
+    """PSN Account device configuration."""
 
     identifier: str
     """Unique identifier of the device."""
     name: str
     """Friendly name of the device."""
-    npsso2: str
+    npsso: str
     """Credentials for different protocols."""
 
 
@@ -39,7 +39,7 @@ class _EnhancedJSONEncoder(json.JSONEncoder):
 
 
 class Devices:
-    """Integration driver configuration class. Manages all configured Apple TV devices."""
+    """Integration driver configuration class. Manages all configured PSN Account devices."""
 
     def __init__(self, data_path: str, add_handler, remove_handler):
         """
@@ -72,7 +72,7 @@ class Devices:
 
     def add_or_update(self, psn: PSNDevice) -> None:
         """
-        Add a new configured Apple TV device and persist configuration.
+        Add a new configured PSN Account device and persist configuration.
 
         The device is updated if it already exists in the configuration.
         """
@@ -92,11 +92,11 @@ class Devices:
         return None
 
     def update(self, psn: PSNDevice) -> bool:
-        """Update a configured Apple TV device and persist configuration."""
+        """Update a configured PSN Account device and persist configuration."""
         for item in self._config:
             if item.identifier == psn.identifier:
                 item.name = psn.name
-                item.npsso2 = psn.npsso2
+                item.npsso = psn.npsso
                 return self.store()
         return False
 
@@ -149,9 +149,8 @@ class Devices:
             with open(self._cfg_file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for item in data:
-                # not using PSNDevice(**item) to be able to migrate old configuration files with missing attributes
                 psn = PSNDevice(
-                    item.get("identifier"), item.get("name", ""), item.get("npsso2", "")
+                    item.get("identifier"), item.get("name", ""), item.get("npsso", "")
                 )
                 self._config.append(psn)
             return True
