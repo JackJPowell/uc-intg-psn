@@ -45,14 +45,13 @@ _user_input_discovery = RequestUserInput(
         {
             "id": "info",
             "label": {
-                "en": "Your NPSSO2 Token is required to authenticate to the PlayStation Network API. Please sign into the Playstation Network in your browser and then navigate to this url: <a href='google.com'>PSN Token</a>",
+                "en": "Your NPSSO2 Token is required to authenticate to the PlayStation Network API. Please sign into the Playstation Network in your browser and then navigate to this url: https://ca.account.sony.com/api/v1/ssocookie",
             },
             "field": {
                 "label": {
                     "value": {
                         "en": (
-                            "Copy the value from the resulting link and paste it below"
-                            "This integration requires access to the internet"
+                            "Copy the value from the link and paste it below"
                         ),
                     }
                 }
@@ -266,15 +265,15 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
         _LOG.debug("Connecting to PSN API")
 
         psnawp = PlaystationNetwork(npsso2)
-        client = psnawp.me()
-        _LOG.info("Account: %s", client.online_id)
+        user = psnawp.get_user()
+        _LOG.info("Account: %s", user.online_id)
 
     # if we are adding a new device: make sure it's not already configured
-    if _cfg_add_device and config.devices.contains(client.account_id):
-        _LOG.info("Skipping found device %s: already configured", client.online_id)
+    if _cfg_add_device and config.devices.contains(user.account_id):
+        _LOG.info("Skipping found device %s: already configured", user.online_id)
         return SetupError(error_type=IntegrationSetupError.OTHER)
 
-    device = PSNDevice(client.account_id, client.online_id, npsso2)
+    device = PSNDevice(user.account_id, user.online_id, npsso2)
     config.devices.add_or_update(device)
 
     await asyncio.sleep(1)
