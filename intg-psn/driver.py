@@ -12,12 +12,12 @@ import os
 from typing import Any
 
 import config
-import setup_flow
 import psn
-from psn import PSNAccount
+import setup_flow
 import ucapi
 import ucapi.api as uc
-from ucapi import MediaPlayer, media_player, StatusCodes
+from psn import PSNAccount
+from ucapi import MediaPlayer, StatusCodes, media_player
 
 _LOG = logging.getLogger("driver")  # avoid having __main__ in log messages
 _LOOP = asyncio.get_event_loop()
@@ -88,7 +88,11 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
                 state = media_player.States.UNAVAILABLE
             else:
                 # TODO Improve State
-                state = media_player.States.ON if playstation.is_on else media_player.States.OFF
+                state = (
+                    media_player.States.ON
+                    if playstation.is_on
+                    else media_player.States.OFF
+                )
             api.configured_entities.update_attributes(
                 entity_id, {media_player.Attributes.STATE: state}
             )
@@ -122,7 +126,7 @@ async def on_unsubscribe_entities(entity_ids: list[str]) -> None:
 async def media_player_cmd_handler(
     entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None
 ) -> ucapi.StatusCodes:
-    """Handle media player events"""
+    """Handle media player events."""
     _LOG.info(
         "Got %s command request: %s %s", entity.id, cmd_id, params if params else ""
     )
@@ -254,7 +258,6 @@ def _register_available_entities(identifier: str, name: str) -> bool:
     :param name: Friendly name
     :return: True if added, False if the device was already in storage.
     """
-
     entity_id = identifier
     features = [
         media_player.Features.MEDIA_TITLE,

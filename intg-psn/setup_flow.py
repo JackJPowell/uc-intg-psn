@@ -8,10 +8,10 @@ Setup flow for Apple TV Remote integration.
 import asyncio
 import logging
 from enum import IntEnum
-from psnawp_api.psn import PlaystationNetwork
 
 import config
 from config import PSNDevice
+from psnawp_api.psn import PlaystationNetwork
 from ucapi import (
     AbortDriverSetup,
     DriverSetupRequest,
@@ -70,7 +70,9 @@ _user_input_discovery = RequestUserInput(
 )
 
 
-async def driver_setup_handler(msg: SetupDriver) -> SetupAction:  # pylint: disable=too-many-return-statements
+async def driver_setup_handler(
+    msg: SetupDriver,
+) -> SetupAction:  # pylint: disable=too-many-return-statements
     """
     Dispatch driver setup requests to corresponding handlers.
 
@@ -269,7 +271,6 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
     :param msg: response data from the requested user data
     :return: the setup action on how to continue
     """
-
     npsso = PlaystationNetwork.parse_npsso_token(msg.input_values["npsso"])
 
     if npsso:

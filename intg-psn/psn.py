@@ -16,10 +16,9 @@ from typing import (
     TypeVar,
 )
 
-from psnawp_api.psn import PlaystationNetwork, PlaystationNetworkData
-from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from config import PSNDevice
-
+from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
+from psnawp_api.psn import PlaystationNetwork, PlaystationNetworkData
 from pyee.asyncio import AsyncIOEventEmitter
 
 _LOG = logging.getLogger(__name__)
@@ -163,7 +162,7 @@ class PSNAccount:
             _LOG.debug("[%s] Polling was already stopped", self.log_id)
 
     def update_attributes(self) -> None:
-        """Update media player attributes and forward ws message"""        
+        """Update media player attributes and forward ws message."""
         _LOG.debug("[%s] Process update", self.log_id)
 
         update = {}
