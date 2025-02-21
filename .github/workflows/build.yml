@@ -1,51 +1,43 @@
-# GitHub Action to build a self-contained binary of the Apple TV Python driver
+# Manual triggered GitHub action to build a distribution binary of the Python integration driver and attach it to a release draft including a hash file
 ---
-name: "Build & Release"
+name: "Build & Draft Release"
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - v[0-9]+.[0-9]+.[0-9]+*
-  pull_request:
-    types: [ opened, synchronize, reopened ]
 
 env:
-  INTG_NAME: appletv
-  HASH_FILENAME: uc-intg-appletv.hash
-  BUILD_CHANGELOG: build-changelog.md
+  INTG_NAME: psn
   # Python version to use in the builder image. See https://hub.docker.com/r/unfoldedcircle/r2-pyinstaller for possible versions.
   PYTHON_VER: 3.11.6-0.2.0
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    name: Build Release
+    runs-on: ubuntu-latest
+    #Save version to env output variable to be able to use it in the following release job as a tag
+    outputs:
+      version: ${{ steps.get-version-and-id.outputs.VERSION }}
+      driver_id: ${{ steps.get-version-and-id.outputs.DRIVER_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # History of 200 should be more than enough to calculate commit count since last release tag.
+          # History of 200 should be more than enough to calculate commit count since last release tag
           fetch-depth: 200
 
-      - name: Fetch all tags to determine version
+      - name: Get version and id
+        #Id needed for env output variable
+        id: get-version-and-id
         run: |
-          git fetch origin +refs/tags/*:refs/tags/*
-          echo "VERSION=$(git describe --match "v[0-9]*" --tags HEAD --always)" >> $GITHUB_ENV
-
-      - name: Verify driver.json version for release build
-        if: contains(github.ref, 'tags/v')
-        run: |
-          DRIVER_VERSION="v$(jq .version -r driver.json)"
-          if [ "${{ env.VERSION }}" != "$DRIVER_VERSION" ]; then
-            echo "Version in driver.json ($DRIVER_VERSION) doesn't match git version tag (${{ env.VERSION }})!"
-            exit 1
-          fi
+          echo "VERSION=$(jq .version -r driver.json)" >> $GITHUB_ENV
+          echo "DRIVER_ID=$(jq .driver_id -r driver.json)" >> $GITHUB_ENV
+          # Save to Github output to later use it in Create Release job
+          echo "VERSION=$(jq .version -r driver.json)" >> $GITHUB_OUTPUT
+          echo "DRIVER_ID=$(jq .driver_id -r driver.json)" >> $GITHUB_OUTPUT
 
       - name: Build
         run: |
-          sudo apt-get update && sudo apt-get install -y qemu-system-arm binfmt-support qemu-user-static
+          sudo apt-get update && sudo apt-get install -y qemu-system binfmt-support qemu-user-static
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
           echo "Starting pyinstaller build"
           docker run --rm --name builder \
@@ -56,25 +48,18 @@ jobs:
             bash -c \
             "cd /workspace && \
               python -m pip install -r requirements.txt && \
-              pyinstaller --clean --onedir --name intg-appletv --collect-all zeroconf intg-appletv/driver.py"
-
-      - name: Add version
-        run: |
-          mkdir -p artifacts
-          cd artifacts
-          echo ${{ env.VERSION }} > version.txt
+              pyinstaller --clean --onedir --name intg-${DRIVER_ID} --collect-all zeroconf intg-${INTG_NAME}/driver.py"
 
       - name: Prepare artifacts
         shell: bash
         run: |
-          mv dist/intg-appletv artifacts/
-          mv artifacts/intg-appletv artifacts/bin
-          mv artifacts/bin/intg-appletv artifacts/bin/driver
+          mkdir -p artifacts/bin
+          mv dist/intg-${{ env.DRIVER_ID }}/* artifacts/bin
+          mv artifacts/bin/intg-${{ env.DRIVER_ID }} artifacts/bin/driver
           cp driver.json artifacts/
-          cp LICENSE artifacts/
-          echo "ARTIFACT_NAME=uc-intg-${{ env.INTG_NAME }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=uc-intg-${{ env.DRIVER_ID }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
           
-      - name: Create upload artifact
+      - name: Create upload artifact archive
         shell: bash
         run: | 
           tar czvf ${{ env.ARTIFACT_NAME }}.tar.gz -C ${GITHUB_WORKSPACE}/artifacts .
@@ -87,41 +72,13 @@ jobs:
           path: ${{ env.ARTIFACT_NAME }}.tar.gz
           if-no-files-found: error
           retention-days: 3
-
-
-  changelog:
-    name: Create changelog
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "lts/*"
-
-      - name: "Create Changelog"
-        run: |
-          npm install -g conventional-changelog-cli
-          conventional-changelog -p conventionalcommits -u -o ${{ env.BUILD_CHANGELOG }}
-          cat ${{ env.BUILD_CHANGELOG }}
-
-      - name: Upload changelog
-        uses: actions/upload-artifact@v4
-        with:
-          name: changelog
-          path: ${{ env.BUILD_CHANGELOG }}
-          if-no-files-found: error
-          retention-days: 3
-
+            
   release:
     name: Create Release
-    if: github.ref == 'refs/heads/main' || contains(github.ref, 'tags/v')
-    runs-on: ubuntu-24.04
-    needs: [build, changelog]
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: write
 
     steps:
       - name: Download build artifacts
@@ -138,59 +95,15 @@ jobs:
             fi
           done;
 
-      # Use a common timestamp for all matrix build artifacts
-      - name: Get timestamp
+      - name: Create hash file
         run: |
-          echo "TIMESTAMP=$(date +"%Y%m%d_%H%M%S")" >> $GITHUB_ENV
+          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${{needs.build.outputs.driver_id}}.hash; done;
 
-      # Add timestamp to development builds
-      - name: Create GitHub development build archives
-        if: "!contains(github.ref, 'tags/v')"
-        run: |
-          # append timestamp
-          for filename in *.tar.gz; do mv $filename "$(basename $filename .tar.gz)-${{ env.TIMESTAMP }}.tar.gz"; done;
-          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${{ env.HASH_FILENAME }}; done;
-
-      # Checkout is required for the next `gh release delete` step
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Create release draft
+        uses: ncipollo/release-action@v1
         with:
-          path: main
-
-      # We have to delete the "latest" release, otherwise `softprops/action-gh-release` will only append the new artifact.
-      # This simulates the old marvinpinto/action-automatic-releases action.
-      - name: Remove previous pre-release
-        run: |
-          cd main
-          gh release delete latest --cleanup-tag -y || true
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      # Use conventional commit changelog, and append the GitHub generated changelog
-      - name: Create Pre-Release
-        uses: softprops/action-gh-release@v2
-        if: "!contains(github.ref, 'tags/v')"
-        with:
-          prerelease: true
-          tag_name: latest
-          body_path: ${{ env.BUILD_CHANGELOG }}
-          generate_release_notes: true
-          name: "Development Build"
-          files: |
-            *.tar.gz
-            ${{ env.HASH_FILENAME }}
-
-      - name: Create GitHub release archives
-        if: "contains(github.ref, 'tags/v')"
-        run: |
-          for filename in *.tar.gz; do echo "sha256  `sha256sum $filename`" >> ${{ env.HASH_FILENAME }}; done;
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        if: "contains(github.ref, 'tags/v')"
-        with:
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            *.tar.gz
-            ${{ env.HASH_FILENAME }}            
+          artifacts: "*.tar.gz,${{needs.build.outputs.driver_id}}.hash"
+          draft: true
+          generateReleaseNotes: true
+          artifactErrorsFailBuild: true
+          tag: v${{needs.build.outputs.version}}
