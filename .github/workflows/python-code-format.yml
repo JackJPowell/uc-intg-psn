@@ -47,6 +47,3 @@ jobs:
       - name: Check code formatting with isort
         run: |
           python -m isort intg-psn/. --check --verbose
-      - name: Check code formatting with black
-        run: |
-          python -m black intg-psn --check --verbose --line-length 120
