@@ -162,4 +162,5 @@ class Devices:
 
         return False
 
+
 devices: Devices | None = None

@@ -178,9 +178,7 @@ class PSNAccount:
                 update["state"] = "PLAYING"
 
         if self._psn_data.title_metadata.get("npTitleId"):
-            update["title"] = self._psn_data.title_metadata.get(
-                "titleName"
-            )
+            update["title"] = self._psn_data.title_metadata.get("titleName")
             update["artist"] = self._psn_data.title_metadata.get("format")
 
         if self._psn_data.title_metadata.get("npTitleId"):
@@ -189,7 +187,7 @@ class PSNAccount:
                 update["artwork"] = title.get("conceptIconUrl")
             if title.get("format", "") == "PS4":
                 update["artwork"] = title.get("npTitleIconUrl")
-        
+
         self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
 
     async def _poll_worker(self) -> None:
