@@ -122,7 +122,7 @@ class PSNAccount:
             )
             self.events.emit(EVENTS.ERROR, self._device.identifier)
             return
-        except Exception as ex:
+        except Exception as ex: # pylint: disable=broad-exception-caught
             _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
             self.events.emit(EVENTS.ERROR, self._device.identifier)
             return
@@ -199,7 +199,7 @@ class PSNAccount:
                     update["artwork"] = title.get("npTitleIconUrl")
 
             self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
-        except Exception as ex:
+        except Exception as ex: # pylint: disable=broad-exception-caught
             _LOG.error("Error while updating data from PSN: %s", ex)
             self.events.emit(EVENTS.ERROR, self._device.identifier)
 
