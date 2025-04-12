@@ -122,6 +122,10 @@ class PSNAccount:
             )
             self.events.emit(EVENTS.ERROR, self._device.identifier)
             return
+        except Exception as ex:
+            _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
+            self.events.emit(EVENTS.ERROR, self._device.identifier)
+            return
 
         self.events.emit(EVENTS.CONNECTED, self._device.identifier)
         _LOG.debug("[%s] Connected", self.log_id)
@@ -166,37 +170,42 @@ class PSNAccount:
         _LOG.debug("[%s] Process update", self.log_id)
 
         update = {}
-        if not self._psn:
-            self._psn = PlaystationNetwork(self._device.npsso)
-        self._psn_data = self._psn.get_data()
+        try:
+            if not self._psn:
+                self._psn = PlaystationNetwork(self._device.npsso)
+            self._psn_data = self._psn.get_data()
 
-        update["state"] = "OFF"
-        if (
-            self._psn_data.platform.get("platform", "")
-            and self._psn_data.platform.get("onlineStatus", "") == "online"
-        ):
-            update["state"] = "ON"
+            update["state"] = "OFF"
             if (
-                self._psn_data.available
-                and self._psn_data.title_metadata.get("npTitleId") is not None
+                self._psn_data.platform.get("platform", "")
+                and self._psn_data.platform.get("onlineStatus", "") == "online"
             ):
-                update["state"] = "PLAYING"
+                update["state"] = "ON"
+                if (
+                    self._psn_data.available
+                    and self._psn_data.title_metadata.get("npTitleId") is not None
+                ):
+                    update["state"] = "PLAYING"
 
-        if self._psn_data.title_metadata.get("npTitleId"):
-            update["title"] = self._psn_data.title_metadata.get("titleName")
-            update["artist"] = self._psn_data.title_metadata.get("format")
+            if self._psn_data.title_metadata.get("npTitleId"):
+                update["title"] = self._psn_data.title_metadata.get("titleName")
+                update["artist"] = self._psn_data.title_metadata.get("format")
 
-        if self._psn_data.title_metadata.get("npTitleId"):
-            title = self._psn_data.title_metadata
-            if title.get("format", "") == "PS5":
-                update["artwork"] = title.get("conceptIconUrl")
-            if title.get("format", "") == "PS4":
-                update["artwork"] = title.get("npTitleIconUrl")
+            if self._psn_data.title_metadata.get("npTitleId"):
+                title = self._psn_data.title_metadata
+                if title.get("format", "") == "PS5":
+                    update["artwork"] = title.get("conceptIconUrl")
+                if title.get("format", "") == "PS4":
+                    update["artwork"] = title.get("npTitleIconUrl")
 
-        self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
+            self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
+        except Exception as ex:
+            _LOG.error("Error while updating data from PSN: %s", ex)
+            self.events.emit(EVENTS.ERROR, self._device.identifier)
 
     async def _poll_worker(self) -> None:
         await asyncio.sleep(2)
         while self._psn is not None:
             self.update_attributes()
+            _LOG.debug("PSN Request made to update attributes")
             await asyncio.sleep(self._poll_interval)
