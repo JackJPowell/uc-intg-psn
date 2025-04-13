@@ -140,8 +140,7 @@ async def on_psn_connected(identifier: str) -> None:
     state = media_player.States.UNKNOWN
     if identifier in _configured_accounts:
         account = _configured_accounts[identifier]
-        if account_state := account.state:
-            state = _psn_state_to_media_player_state(account_state)
+        state = _psn_state_to_media_player_state(account.state)
 
     api.configured_entities.update_attributes(
         identifier, {media_player.Attributes.STATE: state}

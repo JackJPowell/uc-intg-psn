@@ -61,7 +61,7 @@ class PSNAccount:
         self._connection_attempts: int = 0
         self._polling = None
         self._poll_interval: int = 45
-        self._state: str | None = None
+        self._state: str | None = "OFF"
 
     @property
     def identifier(self) -> str:
@@ -109,7 +109,7 @@ class PSNAccount:
         """Establish connection to PSN."""
         if self._is_on is True:
             return
-        
+
         self.events.emit(EVENTS.CONNECTING, self._device.identifier)
 
         try:
@@ -189,6 +189,7 @@ class PSNAccount:
                 ):
                     update["state"] = "PLAYING"
 
+            self._state = update["state"]
             if self._psn_data.title_metadata.get("npTitleId"):
                 update["title"] = self._psn_data.title_metadata.get("titleName")
                 update["artist"] = self._psn_data.title_metadata.get("format")
