@@ -320,7 +320,7 @@ async def main():
     logging.basicConfig()
 
     level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
-    logging.getLogger("tv").setLevel(level)
+    logging.getLogger("psn").setLevel(level)
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("config").setLevel(level)
     logging.getLogger("discover").setLevel(level)

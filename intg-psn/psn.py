@@ -60,7 +60,7 @@ class PSNAccount:
         self._device: PSNDevice = device
         self._connection_attempts: int = 0
         self._polling = None
-        self._poll_interval: int = 30
+        self._poll_interval: int = 45
         self._state: str | None = None
 
     @property
@@ -82,7 +82,7 @@ class PSNAccount:
 
     @property
     def is_on(self) -> bool | None:
-        """Whether the Apple TV is on or off. Returns None if not connected."""
+        """Whether the PSN is on or off. Returns None if not connected."""
         if self._psn and self._psn_data.available is True:
             self._is_on = True
         return self._is_on
@@ -109,8 +109,7 @@ class PSNAccount:
         """Establish connection to PSN."""
         if self._is_on is True:
             return
-        self._is_on = True
-
+        
         self.events.emit(EVENTS.CONNECTING, self._device.identifier)
 
         try:
@@ -121,15 +120,18 @@ class PSNAccount:
                 "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
             )
             self.events.emit(EVENTS.ERROR, self._device.identifier)
+            self._is_on = False
             return
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
             self.events.emit(EVENTS.ERROR, self._device.identifier)
+            self._is_on = False
             return
 
         self.events.emit(EVENTS.CONNECTED, self._device.identifier)
         _LOG.debug("[%s] Connected", self.log_id)
         self.update_attributes()
+        self._is_on = True
         await self._start_polling()
 
     async def disconnect(self) -> None:
