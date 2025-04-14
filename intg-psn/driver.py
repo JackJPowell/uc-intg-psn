@@ -84,15 +84,7 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
         if psn_id in _configured_accounts:
             playstation = _configured_accounts[psn_id]
             _LOG.info("Add '%s' to configured devices and connect", playstation.name)
-            if playstation.is_on is None:
-                state = media_player.States.UNAVAILABLE
-            else:
-                # TODO Improve State
-                state = (
-                    media_player.States.ON
-                    if playstation.is_on
-                    else media_player.States.OFF
-                )
+            state = _psn_state_to_media_player_state(playstation.state)
             api.configured_entities.update_attributes(
                 entity_id, {media_player.Attributes.STATE: state}
             )
@@ -138,7 +130,8 @@ async def on_psn_connected(identifier: str) -> None:
     """Handle PSN connection."""
     _LOG.debug("PSN connected: %s", identifier)
     state = media_player.States.UNKNOWN
-    if identifier in _configured_accounts:
+    device = config.devices.get(identifier)
+    if device:
         account = _configured_accounts[identifier]
         state = _psn_state_to_media_player_state(account.state)
 
@@ -164,19 +157,16 @@ async def on_psn_connection_error(identifier: str, message) -> None:
     api.configured_entities.update_attributes(
         identifier, {media_player.Attributes.STATE: media_player.States.UNAVAILABLE}
     )
-    await api.set_device_state(ucapi.DeviceStates.ERROR)
 
 
 def _psn_state_to_media_player_state(
     device_state: str,
 ) -> media_player.States:
     match device_state:
-        case "ON":
+        case "ON" | "MENU":
             state = media_player.States.ON
         case "OFF":
             state = media_player.States.OFF
-        case "MENU":
-            state = media_player.States.ON
         case "PLAYING":
             state = media_player.States.PLAYING
         case _:
@@ -203,8 +193,7 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
 
     if "state" in update:
         state = _psn_state_to_media_player_state(update["state"])
-        if target_entity.attributes.get(media_player.Attributes.STATE, None) != state:
-            attributes[media_player.Attributes.STATE] = state
+        attributes[media_player.Attributes.STATE] = state
 
     if "artwork" in update:
         attributes[media_player.Attributes.MEDIA_IMAGE_URL] = update["artwork"]
@@ -213,12 +202,11 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
     if "artist" in update:
         attributes[media_player.Attributes.MEDIA_ARTIST] = update["artist"]
 
-    if media_player.Attributes.STATE in attributes:
-        if attributes[media_player.Attributes.STATE] == media_player.States.OFF:
-            attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
-            attributes[media_player.Attributes.MEDIA_ARTIST] = ""
-            attributes[media_player.Attributes.MEDIA_TITLE] = ""
-            attributes[media_player.Attributes.MEDIA_DURATION] = 0
+    if "state" in update and update["state"] == "OFF":
+        attributes[media_player.Attributes.STATE] = _psn_state_to_media_player_state(update["state"])
+        attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
+        attributes[media_player.Attributes.MEDIA_ARTIST] = ""
+        attributes[media_player.Attributes.MEDIA_TITLE] = ""
 
     if attributes:
         if api.configured_entities.contains(entity_id):
@@ -269,7 +257,7 @@ def _register_available_entities(identifier: str, name: str) -> bool:
         name,
         features,
         {
-            media_player.Attributes.STATE: media_player.States.UNAVAILABLE,
+            media_player.Attributes.STATE: media_player.States.UNKNOWN,
             media_player.Attributes.MEDIA_IMAGE_URL: "",
             media_player.Attributes.MEDIA_TITLE: "",
             media_player.Attributes.MEDIA_ARTIST: "",
@@ -334,7 +322,7 @@ async def main():
     # Note: device will be moved to configured devices with the subscribe_events request!
     # This will also start the device connection.
     for device in config.devices.all():
-        _register_available_entities(device.identifier, device.name)
+        _add_configured_psn(device)
 
     await api.init("driver.json", setup_flow.driver_setup_handler)
 
