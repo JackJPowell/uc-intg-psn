@@ -108,13 +108,18 @@ class PSNAccount:
     async def connect(self) -> None:
         """Establish connection to PSN."""
         if self._is_on is True:
+            _LOG.info("PSN is_on. Skipping reconnect")
             return
 
         self.events.emit(EVENTS.CONNECTING, self._device.identifier)
 
         try:
             self._psn = PlaystationNetwork(self._device.npsso)
-            self._psn_data = self._psn.get_data()
+            self.events.emit(EVENTS.CONNECTED, self._device.identifier)
+            _LOG.debug("[%s] Connected", self.log_id)
+            self.update_attributes()
+            self._is_on = True
+            await self._start_polling()
         except PSNAWPAuthenticationError as ex:
             _LOG.error(
                 "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
@@ -128,11 +133,7 @@ class PSNAccount:
             self._is_on = False
             return
 
-        self.events.emit(EVENTS.CONNECTED, self._device.identifier)
-        _LOG.debug("[%s] Connected", self.log_id)
-        self.update_attributes()
-        self._is_on = True
-        await self._start_polling()
+        
 
     async def disconnect(self) -> None:
         """Disconnect from PSN."""
@@ -151,9 +152,12 @@ class PSNAccount:
             self._psn = None
 
     async def _start_polling(self) -> None:
+        if self._polling:
+            _LOG.debug("[%s] Polling is already running", self.log_id)
+            return
+
         if self._psn is None:
             _LOG.warning("[%s] Polling not started, PSN object is None", self.log_id)
-            self.events.emit(EVENTS.ERROR, "Polling not started, PSN object is None")
             return
 
         self._polling = self._loop.create_task(self._poll_worker())
@@ -161,8 +165,13 @@ class PSNAccount:
 
     async def _stop_polling(self) -> None:
         if self._polling:
-            self._polling.cancel()
-            self._polling = None
+            try:
+                self._polling.cancel()
+                await self._polling
+            except asyncio.CancelledError:
+                _LOG.debug("[%s] Polling task was cancelled", self.log_id)
+            finally:
+                self._polling = None
             _LOG.debug("[%s] Polling stopped", self.log_id)
         else:
             _LOG.debug("[%s] Polling was already stopped", self.log_id)
@@ -207,8 +216,19 @@ class PSNAccount:
             self.events.emit(EVENTS.ERROR, self._device.identifier)
 
     async def _poll_worker(self) -> None:
-        await asyncio.sleep(2)
-        while self._psn is not None:
-            self.update_attributes()
-            _LOG.debug("PSN Request made to update attributes")
-            await asyncio.sleep(self._poll_interval)
+        try:
+            await asyncio.sleep(2)
+            while self._psn is not None:
+                self.update_attributes()
+                _LOG.debug("PSN Request made to update attributes")
+                await asyncio.sleep(self._poll_interval)
+            else:
+                _LOG.warning("[%s] PSN object is None, attempting to reconnect", self.log_id)
+                await asyncio.sleep(self._poll_interval)
+                await self.connect()
+        except asyncio.CancelledError:
+            _LOG.debug("[%s] Polling task was cancelled", self.log_id)
+        except Exception as ex:
+            _LOG.error("[%s] Error in polling task: %s", self.log_id, ex)
+        finally:
+            _LOG.debug("[%s] Polling task exited", self.log_id)
