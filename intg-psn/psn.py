@@ -124,16 +124,15 @@ class PSNAccount:
             _LOG.error(
                 "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
             )
-            self.events.emit(EVENTS.ERROR, self._device.identifier)
+            self.events.emit(EVENTS.ERROR, self._device.identifier, "Your NPSSO Token has expired. Please rerun setup to update.")
             self._is_on = False
             return
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
-            self.events.emit(EVENTS.ERROR, self._device.identifier)
+            self.events.emit(EVENTS.ERROR, self._device.identifier, "An error occured when trying to connect to the PSN")
             self._is_on = False
             return
-
-        
+ 
 
     async def disconnect(self) -> None:
         """Disconnect from PSN."""
@@ -213,7 +212,7 @@ class PSNAccount:
             self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("Error while updating data from PSN: %s", ex)
-            self.events.emit(EVENTS.ERROR, self._device.identifier)
+            self.events.emit(EVENTS.ERROR, self._device.identifier, "Error while updating data from PSN")
 
     async def _poll_worker(self) -> None:
         try:
@@ -222,13 +221,12 @@ class PSNAccount:
                 self.update_attributes()
                 _LOG.debug("PSN Request made to update attributes")
                 await asyncio.sleep(self._poll_interval)
-            else:
-                _LOG.warning("[%s] PSN object is None, attempting to reconnect", self.log_id)
-                await asyncio.sleep(self._poll_interval)
-                await self.connect()
+            _LOG.warning("[%s] PSN object is None, attempting to reconnect", self.log_id)
+            await asyncio.sleep(self._poll_interval)
+            await self.connect()
         except asyncio.CancelledError:
             _LOG.debug("[%s] Polling task was cancelled", self.log_id)
-        except Exception as ex:
+        except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error in polling task: %s", self.log_id, ex)
         finally:
             _LOG.debug("[%s] Polling task exited", self.log_id)
