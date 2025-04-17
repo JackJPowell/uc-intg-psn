@@ -1,6 +1,6 @@
 {
 	"driver_id": "psn_driver",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"min_core_api": "0.20.0",
 	"name": { "en": "PlayStation Network" },
 	"icon": "uc:gamepad-modern",
@@ -37,5 +37,5 @@
 			}
 		]
 	},
-	"release_date": "2025-04-14"
+	"release_date": "2025-04-17"
 }

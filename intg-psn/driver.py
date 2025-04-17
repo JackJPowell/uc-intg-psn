@@ -203,7 +203,9 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
         attributes[media_player.Attributes.MEDIA_ARTIST] = update["artist"]
 
     if "state" in update and update["state"] == "OFF":
-        attributes[media_player.Attributes.STATE] = _psn_state_to_media_player_state(update["state"])
+        attributes[media_player.Attributes.STATE] = _psn_state_to_media_player_state(
+            update["state"]
+        )
         attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
         attributes[media_player.Attributes.MEDIA_ARTIST] = ""
         attributes[media_player.Attributes.MEDIA_TITLE] = ""

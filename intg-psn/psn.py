@@ -27,6 +27,8 @@ BACKOFF_MAX = 30
 BACKOFF_SEC = 2
 ARTWORK_WIDTH = 400
 ARTWORK_HEIGHT = 400
+WEBSOCKET_WATCHDOG_INTERVAL = 10
+CONNECTION_RETRIES = 10
 
 
 class EVENTS(IntEnum):
@@ -62,6 +64,7 @@ class PSNAccount:
         self._polling = None
         self._poll_interval: int = 45
         self._state: str | None = "OFF"
+        self._reconnect_retry: int = 0
 
     @property
     def identifier(self) -> str:
@@ -92,12 +95,6 @@ class PSNAccount:
         """Return the device state."""
         return self._state
 
-    def _backoff(self) -> float:
-        if self._connection_attempts * BACKOFF_SEC >= BACKOFF_MAX:
-            return BACKOFF_MAX
-
-        return self._connection_attempts * BACKOFF_SEC
-
     def _handle_disconnect(self):
         """Handle that the device disconnected and restart connect loop."""
         _ = asyncio.ensure_future(self._stop_polling())
@@ -124,15 +121,22 @@ class PSNAccount:
             _LOG.error(
                 "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
             )
-            self.events.emit(EVENTS.ERROR, self._device.identifier, "Your NPSSO Token has expired. Please rerun setup to update.")
+            self.events.emit(
+                EVENTS.ERROR,
+                self._device.identifier,
+                "Your NPSSO Token has expired. Please rerun setup to update.",
+            )
             self._is_on = False
             return
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
-            self.events.emit(EVENTS.ERROR, self._device.identifier, "An error occured when trying to connect to the PSN")
+            self.events.emit(
+                EVENTS.ERROR,
+                self._device.identifier,
+                "An error occured when trying to connect to the PSN",
+            )
             self._is_on = False
             return
- 
 
     async def disconnect(self) -> None:
         """Disconnect from PSN."""
@@ -212,17 +216,29 @@ class PSNAccount:
             self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("Error while updating data from PSN: %s", ex)
-            self.events.emit(EVENTS.ERROR, self._device.identifier, "Error while updating data from PSN")
+            self.events.emit(
+                EVENTS.ERROR,
+                self._device.identifier,
+                "Error while updating data from PSN",
+            )
 
     async def _poll_worker(self) -> None:
         try:
             await asyncio.sleep(2)
             while self._psn is not None:
-                self.update_attributes()
-                _LOG.debug("PSN Request made to update attributes")
+                try:
+                    self.update_attributes()
+                    _LOG.debug("PSN Request made to update attributes")
+                except Exception as ex:  # pylint: disable=broad-exception-caught
+                    _LOG.error("[%s] Error while updating attributes: %s", self.log_id, ex)
+                    _LOG.warning("[%s] Attempting to reconnect after error", self.log_id)
+                    await self.connect()  # Attempt to reconnect after an error
                 await asyncio.sleep(self._poll_interval)
-            _LOG.warning("[%s] PSN object is None, attempting to reconnect", self.log_id)
+            _LOG.warning(
+                "[%s] PSN object is None, attempting to reconnect", self.log_id
+            )
             await asyncio.sleep(self._poll_interval)
+            self._is_on = False
             await self.connect()
         except asyncio.CancelledError:
             _LOG.debug("[%s] Polling task was cancelled", self.log_id)
