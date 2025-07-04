@@ -13,7 +13,8 @@ The simpliest way to get started is by uploading this integration to your unfold
 
 ### Docker
 ```docker run -d --name=uc-intg-psn  --network host \
-  -v $(pwd)/<local_directory>:/config \ --restart unless-stopped ghcr.io/jackjpowell/uc-intg-psn:latest```
+  -v $(pwd)/<local_directory>:/config \ --restart unless-stopped ghcr.io/jackjpowell/uc-intg-psn:latest
+```
 
 ### Docker Compose
 ```
