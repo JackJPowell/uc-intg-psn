@@ -230,8 +230,12 @@ class PSNAccount:
                     self.update_attributes()
                     _LOG.debug("PSN Request made to update attributes")
                 except Exception as ex:  # pylint: disable=broad-exception-caught
-                    _LOG.error("[%s] Error while updating attributes: %s", self.log_id, ex)
-                    _LOG.warning("[%s] Attempting to reconnect after error", self.log_id)
+                    _LOG.error(
+                        "[%s] Error while updating attributes: %s", self.log_id, ex
+                    )
+                    _LOG.warning(
+                        "[%s] Attempting to reconnect after error", self.log_id
+                    )
                     await self.connect()  # Attempt to reconnect after an error
                 await asyncio.sleep(self._poll_interval)
             _LOG.warning(
