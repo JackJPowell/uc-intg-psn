@@ -9,8 +9,11 @@ Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from 
 
 import asyncio
 import logging
+from dataclasses import dataclass
+from typing import Any
 from asyncio import AbstractEventLoop
 from enum import IntEnum
+import json
 from typing import (
     ParamSpec,
     TypeVar,
@@ -18,8 +21,10 @@ from typing import (
 
 from config import PSNDevice
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
-from psnawp_api.psn import PlaystationNetwork, PlaystationNetworkData
+from psnawp_api import PSNAWP
+from psnawp_api.models.user import User
 from pyee.asyncio import AsyncIOEventEmitter
+from pyrate_limiter import Duration, Rate
 
 _LOG = logging.getLogger(__name__)
 
@@ -43,6 +48,76 @@ class EVENTS(IntEnum):
 
 _PSNAccountT = TypeVar("_PSNAccountT", bound="PSNAccount")
 _P = ParamSpec("_P")
+
+
+@dataclass
+class PlaystationNetworkData:
+    """Dataclass representing data retrieved from the Playstation Network api."""
+
+    presence: dict[str, Any]
+    username: str
+    account_id: str
+    available: bool
+    title_metadata: dict[str, Any]
+    platform: dict[str, Any]
+    registered_platforms: list[str]
+
+
+class PlaystationNetwork:
+    """Helper Class to return playstation network data in an easy to use structure
+
+    :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
+
+    def __init__(self, npsso: str):
+        self.rate = Rate(300, Duration.MINUTE * 15)
+        self.psn = PSNAWP(npsso, rate_limit=self.rate)
+        self.client = self.psn.me()
+        self.user: User | None = None
+        self.data: PlaystationNetworkData | None = None
+
+    def validate_connection(self):
+        self.psn.me()
+
+    def get_user(self):
+        self.user = self.psn.user(online_id="me")
+        return self.user
+
+    def get_data(self):
+        data: PlaystationNetworkData = PlaystationNetworkData(
+            {}, "", "", False, {}, {}, []
+        )
+
+        if not self.user:
+            self.user = self.get_user()
+
+        devices = self.client.get_account_devices()
+        for device in devices:
+            if (
+                device.get("deviceType") in ["PS5", "PS4"]
+                and device.get("deviceType") not in data.registered_platforms
+            ):
+                data.registered_platforms.append(device.get("deviceType", ""))
+
+        data.username = self.user.online_id
+        data.account_id = self.user.account_id
+        data.presence = self.user.get_presence()
+
+        data.available = (
+            data.presence.get("basicPresence", {}).get("availability")
+            == "availableToPlay"
+        )
+        data.platform = data.presence.get("basicPresence", {}).get(
+            "primaryPlatformInfo"
+        )
+        game_title_info_list = data.presence.get("basicPresence", {}).get(
+            "gameTitleInfoList"
+        )
+
+        if game_title_info_list:
+            data.title_metadata = game_title_info_list[0]
+
+        self.data = data
+        return self.data
 
 
 class PSNAccount:

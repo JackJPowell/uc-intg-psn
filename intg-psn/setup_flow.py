@@ -11,7 +11,6 @@ from enum import IntEnum
 
 import config
 from config import PSNDevice
-from psnawp_api.psn import PlaystationNetwork
 from ucapi import (
     AbortDriverSetup,
     DriverSetupRequest,
@@ -23,6 +22,8 @@ from ucapi import (
     SetupError,
     UserDataResponse,
 )
+from psn import PlaystationNetwork
+from psnawp_api.utils.misc import parse_npsso_token
 
 _LOG = logging.getLogger(__name__)
 
@@ -271,7 +272,7 @@ async def _handle_discovery(msg: UserDataResponse) -> RequestUserInput | SetupEr
     :param msg: response data from the requested user data
     :return: the setup action on how to continue
     """
-    npsso = PlaystationNetwork.parse_npsso_token(msg.input_values["npsso"])
+    npsso = parse_npsso_token(msg.input_values["npsso"])
 
     if npsso:
         _LOG.debug("Connecting to PSN API")
