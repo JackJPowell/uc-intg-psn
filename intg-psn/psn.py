@@ -64,7 +64,7 @@ class PlaystationNetwork:
     :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
 
     def __init__(self, npsso: str):
-        self.rate = [Rate(300, Duration.MINUTE * 15)]
+        self.rate = Rate(300, Duration.MINUTE * 15)
         self.psn = PSNAWP(npsso, rate_limit=self.rate)
         self.client = self.psn.me()
         self.user: User | None = None
