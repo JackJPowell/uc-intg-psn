@@ -9,19 +9,14 @@ Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from 
 
 import asyncio
 import logging
-from dataclasses import dataclass
-from typing import Any
 from asyncio import AbstractEventLoop
+from dataclasses import dataclass
 from enum import IntEnum
-import json
-from typing import (
-    ParamSpec,
-    TypeVar,
-)
+from typing import Any, ParamSpec, TypeVar
 
 from config import PSNDevice
-from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from psnawp_api import PSNAWP
+from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from psnawp_api.models.user import User
 from pyee.asyncio import AsyncIOEventEmitter
 from pyrate_limiter import Duration, Rate
@@ -69,7 +64,7 @@ class PlaystationNetwork:
     :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
 
     def __init__(self, npsso: str):
-        self.rate = Rate(300, Duration.MINUTE * 15)
+        self.rate = [Rate(300, Duration.MINUTE * 15)]
         self.psn = PSNAWP(npsso, rate_limit=self.rate)
         self.client = self.psn.me()
         self.user: User | None = None
@@ -81,6 +76,27 @@ class PlaystationNetwork:
     def get_user(self):
         self.user = self.psn.user(online_id="me")
         return self.user
+
+    def close(self):
+        """Close the PSN connection and cleanup resources."""
+        try:
+            if hasattr(self.psn, "authenticator") and hasattr(
+                self.psn.authenticator, "session"
+            ):
+                # Close the aiohttp session if it exists
+                session = self.psn.authenticator.session
+                if session and not session.closed:
+                    # Schedule the session close in the event loop
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.create_task(session.close())
+                        else:
+                            loop.run_until_complete(session.close())
+                    except Exception as ex:  # pylint: disable=broad-exception-caught
+                        _LOG.debug("Error closing session: %s", ex)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.debug("Error during PSN cleanup: %s", ex)
 
     def get_data(self):
         data: PlaystationNetworkData = PlaystationNetworkData(
@@ -174,7 +190,12 @@ class PSNAccount:
         """Handle that the device disconnected and restart connect loop."""
         _ = asyncio.ensure_future(self._stop_polling())
         if self._psn:
-            self._psn = None
+            try:
+                self._psn.close()
+            except Exception as ex:  # pylint: disable=broad-exception-caught
+                _LOG.debug("[%s] Error closing PSN connection: %s", self.log_id, ex)
+            finally:
+                self._psn = None
         self.events.emit(EVENTS.DISCONNECTED, self._device.identifier)
 
     async def connect(self) -> None:
@@ -219,15 +240,15 @@ class PSNAccount:
         self._is_on = False
         await self._stop_polling()
 
-        try:
-            if self._psn:
+        if self._psn:
+            try:
+                self._psn.close()
+            except Exception as err:  # pylint: disable=broad-exception-caught
+                _LOG.exception(
+                    "[%s] An error occurred while disconnecting: %s", self.log_id, err
+                )
+            finally:
                 self._psn = None
-        except Exception as err:  # pylint: disable=broad-exception-caught
-            _LOG.exception(
-                "[%s] An error occurred while disconnecting: %s", self.log_id, err
-            )
-        finally:
-            self._psn = None
 
     async def _start_polling(self) -> None:
         if self._polling:
@@ -261,7 +282,11 @@ class PSNAccount:
         update = {}
         try:
             if not self._psn:
-                self._psn = PlaystationNetwork(self._device.npsso)
+                _LOG.warning(
+                    "[%s] PSN object is None, cannot update attributes", self.log_id
+                )
+                return
+
             self._psn_data = self._psn.get_data()
 
             update["state"] = "OFF"
@@ -298,29 +323,47 @@ class PSNAccount:
             )
 
     async def _poll_worker(self) -> None:
+        """Poll worker that periodically updates attributes."""
         try:
             await asyncio.sleep(2)
-            while self._psn is not None:
+            consecutive_errors = 0
+            max_consecutive_errors = 3
+
+            while self._psn is not None and self._is_on:
                 try:
                     self.update_attributes()
-                    _LOG.debug("PSN Request made to update attributes")
+                    consecutive_errors = 0  # Reset error counter on success
+                    _LOG.debug(
+                        "[%s] PSN Request made to update attributes", self.log_id
+                    )
                 except Exception as ex:  # pylint: disable=broad-exception-caught
+                    consecutive_errors += 1
                     _LOG.error(
-                        "[%s] Error while updating attributes: %s", self.log_id, ex
+                        "[%s] Error while updating attributes (%d/%d): %s",
+                        self.log_id,
+                        consecutive_errors,
+                        max_consecutive_errors,
+                        ex,
                     )
-                    _LOG.warning(
-                        "[%s] Attempting to reconnect after error", self.log_id
-                    )
-                    await self.connect()  # Attempt to reconnect after an error
+
+                    if consecutive_errors >= max_consecutive_errors:
+                        _LOG.error(
+                            "[%s] Too many consecutive errors, stopping polling",
+                            self.log_id,
+                        )
+                        self._is_on = False
+                        self._handle_disconnect()
+                        break
+
                 await asyncio.sleep(self._poll_interval)
-            _LOG.warning(
-                "[%s] PSN object is None, attempting to reconnect", self.log_id
-            )
-            await asyncio.sleep(self._poll_interval)
-            self._is_on = False
-            await self.connect()
+
+            if not self._is_on:
+                _LOG.info(
+                    "[%s] Polling stopped because device is marked as off", self.log_id
+                )
         except asyncio.CancelledError:
             _LOG.debug("[%s] Polling task was cancelled", self.log_id)
+            raise  # Re-raise CancelledError to properly handle task cancellation
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error in polling task: %s", self.log_id, ex)
         finally:
