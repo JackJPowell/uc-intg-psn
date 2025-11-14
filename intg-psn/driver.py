@@ -31,11 +31,8 @@ _configured_accounts: dict[str, psn.PSNAccount] = {}
 async def on_r2_connect_cmd() -> None:
     """Connect all configured Accounts when the Remote Two sends the connect command."""
     _LOG.debug("Client connect command: connecting device(s)")
-    await api.set_device_state(
-        ucapi.DeviceStates.CONNECTED
-    )  # just to make sure the device state is set
+    await api.set_device_state(ucapi.DeviceStates.CONNECTED)
     for account in _configured_accounts.values():
-        # start background task
         await account.connect()
 
 
@@ -80,23 +77,28 @@ async def on_subscribe_entities(entity_ids: list[str]) -> None:
     """
     _LOG.debug("Subscribe entities event: %s", entity_ids)
     for entity_id in entity_ids:
+        # For PSN, entity_id IS the PSN account identifier
         psn_id = entity_id
+
+        # Check if already configured
         if psn_id in _configured_accounts:
             playstation = _configured_accounts[psn_id]
-            _LOG.info("Add '%s' to configured devices and connect", playstation.name)
-            state = _psn_state_to_media_player_state(playstation.state)
-            api.configured_entities.update_attributes(
-                entity_id, {media_player.Attributes.STATE: state}
-            )
-            await playstation.connect()
+            # Get the configured entity to verify it exists
+            configured_entity = api.configured_entities.get(entity_id)
+            if isinstance(configured_entity, MediaPlayer):
+                state = _psn_state_to_media_player_state(playstation.state)
+                api.configured_entities.update_attributes(
+                    entity_id, {media_player.Attributes.STATE: state}
+                )
             continue
 
+        # Not yet configured - try to load from config
         device = config.devices.get(psn_id)
         if device:
             _add_configured_psn(device)
         else:
             _LOG.error(
-                "Failed to subscribe entity %s: no PSN instance found", entity_id
+                "Failed to subscribe entity %s: no PSN configuration found", entity_id
             )
 
 
@@ -129,18 +131,12 @@ async def media_player_cmd_handler(
 async def on_psn_connected(identifier: str) -> None:
     """Handle PSN connection."""
     _LOG.debug("PSN connected: %s", identifier)
-    state = media_player.States.UNKNOWN
-    device = config.devices.get(identifier)
-    if device:
-        account = _configured_accounts[identifier]
-        state = _psn_state_to_media_player_state(account.state)
+
+    await api.set_device_state(ucapi.DeviceStates.CONNECTED)
 
     api.configured_entities.update_attributes(
-        identifier, {media_player.Attributes.STATE: state}
+        identifier, {media_player.Attributes.STATE: ucapi.media_player.States.UNKNOWN}
     )
-    await api.set_device_state(
-        ucapi.DeviceStates.CONNECTED
-    )  # just to make sure the device state is set
 
 
 async def on_psn_disconnected(identifier: str) -> None:
@@ -182,13 +178,24 @@ async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
     :param entity_id: PSN media-player entity identifier
     :param update: dictionary containing the updated properties or None
     """
+    # Ensure this entity belongs to this integration
+    if entity_id not in _configured_accounts:
+        _LOG.debug("Ignoring update for unknown PSN entity: %s", entity_id)
+        return
+
+    if update is None:
+        _LOG.debug("No update data provided for entity: %s", entity_id)
+        return
+
     attributes = {}
 
     if api.configured_entities.contains(entity_id):
         target_entity = api.configured_entities.get(entity_id)
     else:
         target_entity = api.available_entities.get(entity_id)
+
     if target_entity is None:
+        _LOG.debug("Entity %s not found in configured or available entities", entity_id)
         return
 
     if "state" in update:
@@ -280,6 +287,12 @@ def on_device_added(device: config.PSNDevice) -> None:
     _add_configured_psn(device)
 
 
+async def _async_remove(account: PSNAccount) -> None:
+    """Disconnect and remove a PSN account asynchronously."""
+    await account.disconnect()
+    account.events.remove_all_listeners()
+
+
 def on_device_removed(device: config.PSNDevice | None) -> None:
     """Handle a removed device in the configuration."""
     if device is None:
@@ -287,8 +300,7 @@ def on_device_removed(device: config.PSNDevice | None) -> None:
             "Configuration cleared, disconnecting & removing all configured PSN instances"
         )
         for account in _configured_accounts.values():
-            _LOOP.create_task(account.disconnect())
-            account.events.remove_all_listeners()
+            _LOOP.create_task(_async_remove(account))
         _configured_accounts.clear()
         api.configured_entities.clear()
         api.available_entities.clear()
@@ -296,8 +308,7 @@ def on_device_removed(device: config.PSNDevice | None) -> None:
         if device.identifier in _configured_accounts:
             _LOG.debug("Disconnecting from removed PSN %s", device.identifier)
             account = _configured_accounts.pop(device.identifier)
-            _LOOP.create_task(account.disconnect())
-            account.events.remove_all_listeners()
+            _LOOP.create_task(_async_remove(account))
 
             entity_id = account.identifier
             api.configured_entities.remove(entity_id)

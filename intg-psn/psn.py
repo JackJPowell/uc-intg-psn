@@ -186,9 +186,9 @@ class PSNAccount:
         """Return the device state."""
         return self._state
 
-    def _handle_disconnect(self):
+    async def _handle_disconnect(self):
         """Handle that the device disconnected and restart connect loop."""
-        _ = asyncio.ensure_future(self._stop_polling())
+        await self._stop_polling()
         if self._psn:
             try:
                 self._psn.close()
@@ -289,33 +289,42 @@ class PSNAccount:
 
             self._psn_data = self._psn.get_data()
 
+            if not self._psn_data:
+                _LOG.warning(
+                    "[%s] PSN data is None, cannot update attributes", self.log_id
+                )
+                return
+
             update["state"] = "OFF"
             if (
-                self._psn_data.platform.get("platform", "")
+                self._psn_data.platform
+                and self._psn_data.platform.get("platform", "")
                 and self._psn_data.platform.get("onlineStatus", "") == "online"
             ):
                 update["state"] = "ON"
                 if (
                     self._psn_data.available
+                    and self._psn_data.title_metadata
                     and self._psn_data.title_metadata.get("npTitleId") is not None
                 ):
                     update["state"] = "PLAYING"
 
             self._state = update["state"]
-            if self._psn_data.title_metadata.get("npTitleId"):
+            if self._psn_data.title_metadata and self._psn_data.title_metadata.get(
+                "npTitleId"
+            ):
                 update["title"] = self._psn_data.title_metadata.get("titleName")
                 update["artist"] = self._psn_data.title_metadata.get("format")
 
-            if self._psn_data.title_metadata.get("npTitleId"):
                 title = self._psn_data.title_metadata
                 if title.get("format", "") == "PS5":
                     update["artwork"] = title.get("conceptIconUrl")
-                if title.get("format", "") == "PS4":
+                elif title.get("format", "") == "PS4":
                     update["artwork"] = title.get("npTitleIconUrl")
 
             self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
         except Exception as ex:  # pylint: disable=broad-exception-caught
-            _LOG.error("Error while updating data from PSN: %s", ex)
+            _LOG.error("[%s] Error while updating data from PSN: %s", self.log_id, ex)
             self.events.emit(
                 EVENTS.ERROR,
                 self._device.identifier,
