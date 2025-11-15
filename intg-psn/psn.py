@@ -1,48 +1,40 @@
 """
-This module implements the PlayStation Network communication of the Remote Two integration driver.
+This module implements the PlayStation Network communication of the Remote integration driver.
 
 Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from the Home Assistant
 
-:copyright: (c) 2023-2024 by Unfolded Circle ApS.
+:copyright: (c) 2023-2024
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
 import asyncio
 import logging
+import os
+import sys
 from asyncio import AbstractEventLoop
 from dataclasses import dataclass
-from enum import IntEnum
-from typing import Any, ParamSpec, TypeVar
+from typing import Any
 
-from config import PSNDevice
-from psnawp_api import PSNAWP
-from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
-from psnawp_api.models.user import User
-from pyee.asyncio import AsyncIOEventEmitter
-from pyrate_limiter import Duration, Rate
+# Add parent directory to path for ucapi_base module (before it's published)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+
+from config import PSNDevice  # noqa: E402
+from psnawp_api import PSNAWP  # noqa: E402
+from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError  # noqa: E402
+from psnawp_api.models.user import User  # noqa: E402
+from pyrate_limiter import Duration, Rate  # noqa: E402
+from ucapi_base.device import PollingDevice, DeviceEvents  # noqa: E402
 
 _LOG = logging.getLogger(__name__)
 
-BACKOFF_MAX = 30
-BACKOFF_SEC = 2
 ARTWORK_WIDTH = 400
 ARTWORK_HEIGHT = 400
-WEBSOCKET_WATCHDOG_INTERVAL = 10
-CONNECTION_RETRIES = 10
 
-
-class EVENTS(IntEnum):
-    """Internal driver events."""
-
-    CONNECTING = 0
-    CONNECTED = 1
-    DISCONNECTED = 2
-    ERROR = 4
-    UPDATE = 5
-
-
-_PSNAccountT = TypeVar("_PSNAccountT", bound="PSNAccount")
-_P = ParamSpec("_P")
+# Map ucapi_base DeviceEvents to EVENTS for backwards compatibility
+EVENTS = DeviceEvents
 
 
 @dataclass
@@ -136,110 +128,69 @@ class PlaystationNetwork:
         return self.data
 
 
-class PSNAccount:
-    """Representing a PSN Account."""
+class PSNAccount(PollingDevice):
+    """Representing a PSN Account using PollingDevice base class."""
 
     def __init__(
         self,
         device: PSNDevice,
         loop: AbstractEventLoop | None = None,
     ) -> None:
-        """Create instance."""
-        self._loop: AbstractEventLoop = loop or asyncio.get_running_loop()
-        self.events = AsyncIOEventEmitter(self._loop)
-        self._is_on: bool = False
+        """Create instance with 45 second poll interval."""
+        super().__init__(device, loop, poll_interval=45)
         self._psn: PlaystationNetwork | None = None
         self._psn_data: PlaystationNetworkData | None = None
-        self._device: PSNDevice = device
-        self._connection_attempts: int = 0
-        self._polling = None
-        self._poll_interval: int = 45
-        self._state: str | None = "OFF"
-        self._reconnect_retry: int = 0
 
     @property
     def identifier(self) -> str:
         """Return the device identifier."""
-        if not self._device.identifier:
+        if not self._device_config.identifier:
             raise ValueError("Instance not initialized, no identifier available")
-        return self._device.identifier
-
-    @property
-    def log_id(self) -> str:
-        """Return a log identifier."""
-        return self._device.name if self._device.name else self._device.identifier
+        return self._device_config.identifier
 
     @property
     def name(self) -> str:
         """Return the device name."""
-        return self._device.name
+        return self._device_config.name
 
     @property
-    def is_on(self) -> bool | None:
-        """Whether the PSN is on or off. Returns None if not connected."""
-        if self._psn and self._psn_data.available is True:
-            self._is_on = True
-        return self._is_on
+    def address(self) -> str | None:
+        """Return the device address (PSN doesn't have a physical address)."""
+        return self._device_config.identifier
 
     @property
-    def state(self) -> str | None:
-        """Return the device state."""
-        return self._state
+    def is_on(self) -> bool:
+        """Whether the PSN is on or off."""
+        if self._psn and self._psn_data and self._psn_data.available is True:
+            return True
+        return False
 
-    async def _handle_disconnect(self):
-        """Handle that the device disconnected and restart connect loop."""
-        await self._stop_polling()
-        if self._psn:
-            try:
-                self._psn.close()
-            except Exception as ex:  # pylint: disable=broad-exception-caught
-                _LOG.debug("[%s] Error closing PSN connection: %s", self.log_id, ex)
-            finally:
-                self._psn = None
-        self.events.emit(EVENTS.DISCONNECTED, self._device.identifier)
-
-    async def connect(self) -> None:
-        """Establish connection to PSN."""
-        if self._is_on is True:
-            _LOG.info("PSN is_on. Skipping reconnect")
-            return
-
-        self.events.emit(EVENTS.CONNECTING, self._device.identifier)
-
+    async def _establish_connection(self) -> None:
+        """Establish connection to PSN - called by base class connect()."""
         try:
-            self._psn = PlaystationNetwork(self._device.npsso)
-            self.events.emit(EVENTS.CONNECTED, self._device.identifier)
-            _LOG.debug("[%s] Connected", self.log_id)
-            self.update_attributes()
-            self._is_on = True
-            await self._start_polling()
+            self._psn = PlaystationNetwork(self._device_config.npsso)
+            _LOG.debug("[%s] PSN connection established", self.log_id)
+            # Do initial attribute update
+            await self._poll_device()
         except PSNAWPAuthenticationError as ex:
             _LOG.error(
-                "Your NPSSO Token has expired. Please rerun setup to update. %s", ex
+                "[%s] NPSSO Token has expired. Please rerun setup to update. %s",
+                self.log_id,
+                ex,
             )
-            self.events.emit(
-                EVENTS.ERROR,
-                self._device.identifier,
-                "Your NPSSO Token has expired. Please rerun setup to update.",
-            )
-            self._is_on = False
-            return
+            raise
         except Exception as ex:  # pylint: disable=broad-exception-caught
-            _LOG.error("An error occured when trying to connect to the PSN:. %s", ex)
-            self.events.emit(
-                EVENTS.ERROR,
-                self._device.identifier,
-                "An error occured when trying to connect to the PSN",
-            )
-            self._is_on = False
-            return
+            _LOG.error("[%s] Error connecting to PSN: %s", self.log_id, ex)
+            raise
 
     async def disconnect(self) -> None:
         """Disconnect from PSN."""
         _LOG.debug("[%s] Disconnecting from device", self.log_id)
-        self._is_on = False
-        await self._stop_polling()
 
+        # Call base class disconnect to stop polling
+        await super().disconnect()
+
+        # Clean up PSN connection
         if self._psn:
             try:
                 self._psn.close()
@@ -250,44 +201,20 @@ class PSNAccount:
             finally:
                 self._psn = None
 
-    async def _start_polling(self) -> None:
-        if self._polling:
-            _LOG.debug("[%s] Polling is already running", self.log_id)
+    async def _poll_device(self) -> None:
+        """
+        Poll the device for status updates - called by base class.
+
+        This method is called periodically by the PollingDevice base class.
+        """
+        _LOG.debug("[%s] Polling PSN for updates", self.log_id)
+
+        if not self._psn:
+            _LOG.warning("[%s] PSN object is None, cannot poll", self.log_id)
             return
 
-        if self._psn is None:
-            _LOG.warning("[%s] Polling not started, PSN object is None", self.log_id)
-            return
-
-        self._polling = self._loop.create_task(self._poll_worker())
-        _LOG.debug("[%s] Polling started", self.log_id)
-
-    async def _stop_polling(self) -> None:
-        if self._polling:
-            try:
-                self._polling.cancel()
-                await self._polling
-            except asyncio.CancelledError:
-                _LOG.debug("[%s] Polling task was cancelled", self.log_id)
-            finally:
-                self._polling = None
-            _LOG.debug("[%s] Polling stopped", self.log_id)
-        else:
-            _LOG.debug("[%s] Polling was already stopped", self.log_id)
-
-    def update_attributes(self) -> None:
-        """Update media player attributes and forward ws message."""
-        _LOG.debug("[%s] Process update", self.log_id)
-
-        update = {}
         try:
-            if not self._psn:
-                _LOG.warning(
-                    "[%s] PSN object is None, cannot update attributes", self.log_id
-                )
-                return
-
-            self._psn_data = self._psn.get_data()
+            self._psn_data = await self._loop.run_in_executor(None, self._psn.get_data)
 
             if not self._psn_data:
                 _LOG.warning(
@@ -295,7 +222,9 @@ class PSNAccount:
                 )
                 return
 
-            update["state"] = "OFF"
+            # Build update dictionary
+            update = {"state": "OFF"}
+
             if (
                 self._psn_data.platform
                 and self._psn_data.platform.get("platform", "")
@@ -310,6 +239,8 @@ class PSNAccount:
                     update["state"] = "PLAYING"
 
             self._state = update["state"]
+
+            # Add title metadata if available
             if self._psn_data.title_metadata and self._psn_data.title_metadata.get(
                 "npTitleId"
             ):
@@ -322,58 +253,14 @@ class PSNAccount:
                 elif title.get("format", "") == "PS4":
                     update["artwork"] = title.get("npTitleIconUrl")
 
-            self.events.emit(EVENTS.UPDATE, self._device.identifier, update)
+            # Emit update event
+            self.events.emit(EVENTS.UPDATE, self.identifier, update)
+            _LOG.debug("[%s] PSN update emitted: %s", self.log_id, update.get("state"))
+
         except Exception as ex:  # pylint: disable=broad-exception-caught
-            _LOG.error("[%s] Error while updating data from PSN: %s", self.log_id, ex)
+            _LOG.error("[%s] Error while polling PSN: %s", self.log_id, ex)
             self.events.emit(
                 EVENTS.ERROR,
-                self._device.identifier,
-                "Error while updating data from PSN",
+                self.identifier,
+                f"Error while polling PSN: {ex}",
             )
-
-    async def _poll_worker(self) -> None:
-        """Poll worker that periodically updates attributes."""
-        try:
-            await asyncio.sleep(2)
-            consecutive_errors = 0
-            max_consecutive_errors = 3
-
-            while self._psn is not None and self._is_on:
-                try:
-                    self.update_attributes()
-                    consecutive_errors = 0  # Reset error counter on success
-                    _LOG.debug(
-                        "[%s] PSN Request made to update attributes", self.log_id
-                    )
-                except Exception as ex:  # pylint: disable=broad-exception-caught
-                    consecutive_errors += 1
-                    _LOG.error(
-                        "[%s] Error while updating attributes (%d/%d): %s",
-                        self.log_id,
-                        consecutive_errors,
-                        max_consecutive_errors,
-                        ex,
-                    )
-
-                    if consecutive_errors >= max_consecutive_errors:
-                        _LOG.error(
-                            "[%s] Too many consecutive errors, stopping polling",
-                            self.log_id,
-                        )
-                        self._is_on = False
-                        self._handle_disconnect()
-                        break
-
-                await asyncio.sleep(self._poll_interval)
-
-            if not self._is_on:
-                _LOG.info(
-                    "[%s] Polling stopped because device is marked as off", self.log_id
-                )
-        except asyncio.CancelledError:
-            _LOG.debug("[%s] Polling task was cancelled", self.log_id)
-            raise  # Re-raise CancelledError to properly handle task cancellation
-        except Exception as ex:  # pylint: disable=broad-exception-caught
-            _LOG.error("[%s] Error in polling task: %s", self.log_id, ex)
-        finally:
-            _LOG.debug("[%s] Polling task exited", self.log_id)

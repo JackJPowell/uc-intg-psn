@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
 """
-This module implements a Remote Two integration driver for PlayStation Network Activity.
+PSN Integration Driver using ucapi_base framework.
 
 :copyright: (c) 2023-2024 by Unfolded Circle ApS.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -9,310 +8,217 @@ This module implements a Remote Two integration driver for PlayStation Network A
 import asyncio
 import logging
 import os
+import sys
 from typing import Any
 
-import config
-import psn
-import setup_flow
-import ucapi
-import ucapi.api as uc
-from psn import PSNAccount
-from ucapi import MediaPlayer, StatusCodes, media_player
+# Add parent directory to path for ucapi_base module (before it's published)
+# This allows importing ucapi_base when running from intg-psn directory
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
 
-_LOG = logging.getLogger("driver")  # avoid having __main__ in log messages
-_LOOP = asyncio.get_event_loop()
+import setup_flow  # noqa: E402
+import config  # noqa: E402
+from config import PSNDevice  # noqa: E402
+from media_player import PSNMediaPlayer  # noqa: E402
+from psn import PSNAccount  # noqa: E402
+from ucapi import media_player  # noqa: E402
+from ucapi_base import BaseIntegrationDriver  # noqa: E402
 
-# Global variables
-api = uc.IntegrationAPI(_LOOP)
-_configured_accounts: dict[str, psn.PSNAccount] = {}
-
-
-@api.listens_to(ucapi.Events.CONNECT)
-async def on_r2_connect_cmd() -> None:
-    """Connect all configured Accounts when the Remote Two sends the connect command."""
-    _LOG.debug("Client connect command: connecting device(s)")
-    await api.set_device_state(ucapi.DeviceStates.CONNECTED)
-    for account in _configured_accounts.values():
-        await account.connect()
+_LOG = logging.getLogger(__name__)
 
 
-@api.listens_to(ucapi.Events.DISCONNECT)
-async def on_r2_disconnect_cmd():
-    """Disconnect all configured Accounts when the Remote Two sends the disconnect command."""
-    _LOG.debug("Client disconnect command: disconnecting device(s)")
-    for account in _configured_accounts.values():
-        await account.disconnect()
-
-
-@api.listens_to(ucapi.Events.ENTER_STANDBY)
-async def on_r2_enter_standby() -> None:
+class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
     """
-    Enter standby notification from Remote Two.
+    PSN Integration driver using ucapi_base framework.
 
-    Disconnect every PSN Account instances.
+    Handles PlayStation Network account management and entity lifecycle.
     """
-    _LOG.debug("Enter standby event: disconnecting device(s)")
-    for account in _configured_accounts.values():
-        await account.disconnect()
 
+    def __init__(self, loop: asyncio.AbstractEventLoop):
+        """
+        Initialize PSN integration driver.
 
-@api.listens_to(ucapi.Events.EXIT_STANDBY)
-async def on_r2_exit_standby() -> None:
-    """
-    Exit standby notification from Remote Two.
+        :param loop: The asyncio event loop
+        """
+        super().__init__(
+            loop=loop, device_class=PSNAccount, entity_classes=[PSNMediaPlayer]
+        )
+        self.config_manager: config.PSNDeviceManager | None = None
 
-    Connect all PSN Account instances.
-    """
-    _LOG.debug("Exit standby event: connecting account(s)")
-    for account in _configured_accounts.values():
-        await account.connect()
+    # ========================================================================
+    # Required Abstract Method Implementations
+    # ========================================================================
 
+    def device_from_entity_id(self, entity_id: str) -> str | None:
+        """
+        Extract device identifier from entity identifier.
 
-@api.listens_to(ucapi.Events.SUBSCRIBE_ENTITIES)
-async def on_subscribe_entities(entity_ids: list[str]) -> None:
-    """
-    Subscribe to given entities.
+        For PSN, the entity_id IS the device identifier (account_id).
 
-    :param entity_ids: entity identifiers.
-    """
-    _LOG.debug("Subscribe entities event: %s", entity_ids)
-    for entity_id in entity_ids:
-        # For PSN, entity_id IS the PSN account identifier
-        psn_id = entity_id
+        :param entity_id: Entity identifier
+        :return: Device identifier (account_id)
+        """
+        return entity_id
 
-        # Check if already configured
-        if psn_id in _configured_accounts:
-            playstation = _configured_accounts[psn_id]
-            # Get the configured entity to verify it exists
-            configured_entity = api.configured_entities.get(entity_id)
-            if isinstance(configured_entity, MediaPlayer):
-                state = _psn_state_to_media_player_state(playstation.state)
-                api.configured_entities.update_attributes(
-                    entity_id, {media_player.Attributes.STATE: state}
-                )
-            continue
+    def get_entity_ids_for_device(self, device_id: str) -> list[str]:
+        """
+        Get all entity identifiers for a device.
 
-        # Not yet configured - try to load from config
-        device = config.devices.get(psn_id)
-        if device:
-            _add_configured_psn(device)
+        PSN has one media_player entity per account.
+
+        :param device_id: Device identifier (account_id)
+        :return: List containing single entity ID
+        """
+        return [device_id]
+
+    def get_device_config(self, device_id: str) -> PSNDevice | None:
+        """
+        Get device configuration for the given device ID.
+
+        :param device_id: Device identifier (account_id)
+        :return: PSN device configuration or None
+        """
+        if self.config_manager is None:
+            _LOG.error("Config manager not initialized")
+            return None
+        return self.config_manager.get(device_id)
+
+    def get_device_id(self, device_config: PSNDevice) -> str:
+        """
+        Extract device ID from device configuration.
+
+        :param device_config: PSN device configuration
+        :return: Device identifier (account_id)
+        """
+        return device_config.identifier
+
+    def get_device_name(self, device_config: PSNDevice) -> str:
+        """
+        Extract device name from device configuration.
+
+        :param device_config: PSN device configuration
+        :return: Device name (online_id)
+        """
+        return device_config.name
+
+    def get_device_address(self, device_config: PSNDevice) -> str:
+        """
+        Extract device address from device configuration.
+
+        PSN doesn't have a physical address, return identifier.
+
+        :param device_config: PSN device configuration
+        :return: Device identifier
+        """
+        return device_config.identifier
+
+    def map_device_state(self, device_state: Any) -> media_player.States:
+        """
+        Map PSN device state to ucapi media player state.
+
+        :param device_state: PSN state string
+        :return: Media player state
+        """
+        match device_state:
+            case "ON" | "MENU":
+                return media_player.States.ON
+            case "OFF":
+                return media_player.States.OFF
+            case "PLAYING":
+                return media_player.States.PLAYING
+            case _:
+                return media_player.States.UNKNOWN
+
+    def create_entities(
+        self, device_config: PSNDevice, device: PSNAccount
+    ) -> list[PSNMediaPlayer]:
+        """
+        Create entity instances for a PSN device.
+
+        :param device_config: PSN device configuration
+        :param device: PSN device instance
+        :return: List containing PSNMediaPlayer entity
+        """
+        return [PSNMediaPlayer(device_config, device)]
+
+    # ========================================================================
+    # Device Event Handler Overrides
+    # ========================================================================
+
+    async def on_device_update(
+        self, device_id: str, update: dict[str, Any] | None
+    ) -> None:
+        """
+        Handle PSN device state updates.
+
+        :param device_id: Device identifier (account_id)
+        :param update: Dictionary containing updated PSN properties
+        """
+        if update is None:
+            _LOG.debug("[%s] No update data provided", device_id)
+            return
+
+        # Ensure this device is configured
+        if device_id not in self._configured_devices:
+            _LOG.debug("[%s] Ignoring update for unknown device", device_id)
+            return
+
+        entity_id = device_id
+        attributes = {}
+
+        # Map state
+        if "state" in update:
+            state = self.map_device_state(update["state"])
+            attributes[media_player.Attributes.STATE] = state
+
+        # Map media information
+        if "artwork" in update:
+            attributes[media_player.Attributes.MEDIA_IMAGE_URL] = update["artwork"]
+        if "title" in update:
+            attributes[media_player.Attributes.MEDIA_TITLE] = update["title"]
+        if "artist" in update:
+            attributes[media_player.Attributes.MEDIA_ARTIST] = update["artist"]
+
+        # Clear media info when OFF
+        if "state" in update and update["state"] == "OFF":
+            attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
+            attributes[media_player.Attributes.MEDIA_ARTIST] = ""
+            attributes[media_player.Attributes.MEDIA_TITLE] = ""
+
+        # Update entity attributes
+        if attributes:
+            if self.api.configured_entities.contains(entity_id):
+                self.api.configured_entities.update_attributes(entity_id, attributes)
+            elif self.api.available_entities.contains(entity_id):
+                self.api.available_entities.update_attributes(entity_id, attributes)
+
+    # ========================================================================
+    # Device Lifecycle Callbacks
+    # ========================================================================
+
+    def on_device_added(self, device: PSNDevice) -> None:
+        """
+        Handle a newly added device in the configuration.
+
+        :param device: PSN device configuration
+        """
+        _LOG.debug("New device added: %s", device)
+        self.add_configured_device(device, connect=False)
+
+    def on_device_removed(self, device: PSNDevice | None) -> None:
+        """
+        Handle a removed device in the configuration.
+
+        :param device: PSN device configuration or None (clear all)
+        """
+        if device is None:
+            _LOG.debug("Configuration cleared, removing all PSN devices")
+            self.clear_devices()
         else:
-            _LOG.error(
-                "Failed to subscribe entity %s: no PSN configuration found", entity_id
-            )
-
-
-@api.listens_to(ucapi.Events.UNSUBSCRIBE_ENTITIES)
-async def on_unsubscribe_entities(entity_ids: list[str]) -> None:
-    """On unsubscribe, we disconnect the objects and remove listeners for events."""
-    _LOG.debug("Unsubscribe entities event: %s", entity_ids)
-    for entity_id in entity_ids:
-        if entity_id in _configured_accounts:
-            account = _configured_accounts.pop(entity_id)
-            _LOG.info(
-                "Removed '%s' from configured accounts and disconnect", account.name
-            )
-            await account.disconnect()
-            account.events.remove_all_listeners()
-
-
-# pylint: disable=too-many-statements
-async def media_player_cmd_handler(
-    entity: MediaPlayer, cmd_id: str, params: dict[str, Any] | None
-) -> ucapi.StatusCodes:
-    """Handle media player events."""
-    _LOG.info(
-        "Got %s command request: %s %s", entity.id, cmd_id, params if params else ""
-    )
-
-    return StatusCodes.OK
-
-
-async def on_psn_connected(identifier: str) -> None:
-    """Handle PSN connection."""
-    _LOG.debug("PSN connected: %s", identifier)
-
-    await api.set_device_state(ucapi.DeviceStates.CONNECTED)
-
-    api.configured_entities.update_attributes(
-        identifier, {media_player.Attributes.STATE: ucapi.media_player.States.UNKNOWN}
-    )
-
-
-async def on_psn_disconnected(identifier: str) -> None:
-    """Handle PSN disconnection."""
-    _LOG.debug("PSN disconnected: %s", identifier)
-    api.configured_entities.update_attributes(
-        identifier, {media_player.Attributes.STATE: media_player.States.OFF}
-    )
-
-
-async def on_psn_connection_error(identifier: str, message) -> None:
-    """Set entities of PSN to state UNAVAILABLE if PSN connection error occurred."""
-    _LOG.error(message)
-    api.configured_entities.update_attributes(
-        identifier, {media_player.Attributes.STATE: media_player.States.UNAVAILABLE}
-    )
-
-
-def _psn_state_to_media_player_state(
-    device_state: str,
-) -> media_player.States:
-    match device_state:
-        case "ON" | "MENU":
-            state = media_player.States.ON
-        case "OFF":
-            state = media_player.States.OFF
-        case "PLAYING":
-            state = media_player.States.PLAYING
-        case _:
-            state = media_player.States.UNKNOWN
-    return state
-
-
-# pylint: disable=too-many-branches,too-many-statements
-async def on_psn_update(entity_id: str, update: dict[str, Any] | None) -> None:
-    """
-    Update attributes of configured media-player entity if PSN properties changed.
-
-    :param entity_id: PSN media-player entity identifier
-    :param update: dictionary containing the updated properties or None
-    """
-    # Ensure this entity belongs to this integration
-    if entity_id not in _configured_accounts:
-        _LOG.debug("Ignoring update for unknown PSN entity: %s", entity_id)
-        return
-
-    if update is None:
-        _LOG.debug("No update data provided for entity: %s", entity_id)
-        return
-
-    attributes = {}
-
-    if api.configured_entities.contains(entity_id):
-        target_entity = api.configured_entities.get(entity_id)
-    else:
-        target_entity = api.available_entities.get(entity_id)
-
-    if target_entity is None:
-        _LOG.debug("Entity %s not found in configured or available entities", entity_id)
-        return
-
-    if "state" in update:
-        state = _psn_state_to_media_player_state(update["state"])
-        attributes[media_player.Attributes.STATE] = state
-
-    if "artwork" in update:
-        attributes[media_player.Attributes.MEDIA_IMAGE_URL] = update["artwork"]
-    if "title" in update:
-        attributes[media_player.Attributes.MEDIA_TITLE] = update["title"]
-    if "artist" in update:
-        attributes[media_player.Attributes.MEDIA_ARTIST] = update["artist"]
-
-    if "state" in update and update["state"] == "OFF":
-        attributes[media_player.Attributes.STATE] = _psn_state_to_media_player_state(
-            update["state"]
-        )
-        attributes[media_player.Attributes.MEDIA_IMAGE_URL] = ""
-        attributes[media_player.Attributes.MEDIA_ARTIST] = ""
-        attributes[media_player.Attributes.MEDIA_TITLE] = ""
-
-    if attributes:
-        if api.configured_entities.contains(entity_id):
-            api.configured_entities.update_attributes(entity_id, attributes)
-        else:
-            api.available_entities.update_attributes(entity_id, attributes)
-
-
-def _add_configured_psn(device: config.PSNDevice) -> None:
-    # the device should not yet be configured, but better be safe
-    if device.identifier in _configured_accounts:
-        playstation = _configured_accounts[device.identifier]
-        _LOOP.create_task(playstation.disconnect())
-    else:
-        _LOG.debug(
-            "Adding new PSN device: %s (%s)",
-            device.name,
-            device.identifier,
-        )
-        playstation = PSNAccount(device, loop=_LOOP)
-        playstation.events.on(psn.EVENTS.CONNECTED, on_psn_connected)
-        playstation.events.on(psn.EVENTS.DISCONNECTED, on_psn_disconnected)
-        playstation.events.on(psn.EVENTS.ERROR, on_psn_connection_error)
-        playstation.events.on(psn.EVENTS.UPDATE, on_psn_update)
-
-        _configured_accounts[device.identifier] = playstation
-
-    _register_available_entities(device.identifier, device.name)
-
-
-def _register_available_entities(identifier: str, name: str) -> bool:
-    """
-    Add a new PSN device to the available entities.
-
-    :param identifier: PSN identifier
-    :param name: Friendly name
-    :return: True if added, False if the device was already in storage.
-    """
-    entity_id = identifier
-    features = [
-        media_player.Features.MEDIA_TITLE,
-        media_player.Features.MEDIA_ARTIST,
-        media_player.Features.MEDIA_IMAGE_URL,
-    ]
-
-    entity = MediaPlayer(
-        entity_id,
-        name,
-        features,
-        {
-            media_player.Attributes.STATE: media_player.States.UNKNOWN,
-            media_player.Attributes.MEDIA_IMAGE_URL: "",
-            media_player.Attributes.MEDIA_TITLE: "",
-            media_player.Attributes.MEDIA_ARTIST: "",
-        },
-        device_class=media_player.DeviceClasses.TV,
-        options={},
-        cmd_handler=media_player_cmd_handler,
-    )
-
-    if api.available_entities.contains(entity.id):
-        api.available_entities.remove(entity.id)
-    return api.available_entities.add(entity)
-
-
-def on_device_added(device: config.PSNDevice) -> None:
-    """Handle a newly added device in the configuration."""
-    _LOG.debug("New device added: %s", device)
-    _add_configured_psn(device)
-
-
-async def _async_remove(account: PSNAccount) -> None:
-    """Disconnect and remove a PSN account asynchronously."""
-    await account.disconnect()
-    account.events.remove_all_listeners()
-
-
-def on_device_removed(device: config.PSNDevice | None) -> None:
-    """Handle a removed device in the configuration."""
-    if device is None:
-        _LOG.debug(
-            "Configuration cleared, disconnecting & removing all configured PSN instances"
-        )
-        for account in _configured_accounts.values():
-            _LOOP.create_task(_async_remove(account))
-        _configured_accounts.clear()
-        api.configured_entities.clear()
-        api.available_entities.clear()
-    else:
-        if device.identifier in _configured_accounts:
-            _LOG.debug("Disconnecting from removed PSN %s", device.identifier)
-            account = _configured_accounts.pop(device.identifier)
-            _LOOP.create_task(_async_remove(account))
-
-            entity_id = account.identifier
-            api.configured_entities.remove(entity_id)
-            api.available_entities.remove(entity_id)
+            _LOG.debug("Removing PSN device: %s", device.identifier)
+            self.remove_device(device.identifier)
 
 
 async def main():
@@ -326,20 +232,28 @@ async def main():
     logging.getLogger("discover").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
 
-    # load paired devices
-    config.devices = config.Devices(
-        api.config_dir_path, on_device_added, on_device_removed
+    # Create event loop and driver
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    driver = PSNIntegrationDriver(loop)
+
+    # Initialize configuration manager with device callbacks
+    config.devices = config.PSNDeviceManager(
+        driver.api.config_dir_path, driver.on_device_added, driver.on_device_removed
     )
+    driver.config_manager = config.devices
 
-    # and register them as available devices.
-    # Note: device will be moved to configured devices with the subscribe_events request!
-    # This will also start the device connection.
+    # Load and register all configured devices
     for device in config.devices.all():
-        _add_configured_psn(device)
+        driver.add_configured_device(device, connect=False)
 
-    await api.init("driver.json", setup_flow.driver_setup_handler)
+    # Initialize the API with setup handler
+    await driver.api.init("driver.json", setup_flow.driver_setup_handler)
 
 
 if __name__ == "__main__":
-    _LOOP.run_until_complete(main())
-    _LOOP.run_forever()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
+    loop.run_forever()

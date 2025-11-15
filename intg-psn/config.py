@@ -5,16 +5,20 @@ Configuration handling of the integration driver.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
-import dataclasses
-import json
 import logging
 import os
+import sys
 from dataclasses import dataclass
-from typing import Iterator
+
+# Add parent directory to path for ucapi_base module (before it's published)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+
+from ucapi_base import BaseDeviceManager  # noqa: E402
 
 _LOG = logging.getLogger(__name__)
-
-_CFG_FILENAME = "config.json"
 
 
 @dataclass
@@ -29,137 +33,25 @@ class PSNDevice:
     """Credentials for different protocols."""
 
 
-class _EnhancedJSONEncoder(json.JSONEncoder):
-    """Python dataclass json encoder."""
+class PSNDeviceManager(BaseDeviceManager[PSNDevice]):
+    """Configuration manager for PSN Account devices."""
 
-    def default(self, o):
-        if dataclasses.is_dataclass(o):
-            return dataclasses.asdict(o)
-        return super().default(o)
+    def get_device_id(self, device: PSNDevice) -> str:
+        """Extract device ID from PSN device."""
+        return device.identifier
 
-
-class Devices:
-    """Integration driver configuration class. Manages all configured PSN Account devices."""
-
-    def __init__(self, data_path: str, add_handler, remove_handler):
-        """
-        Create a configuration instance for the given configuration path.
-
-        :param data_path: configuration path for the configuration file and client device certificates.
-        """
-        self._data_path: str = data_path
-        self._cfg_file_path: str = os.path.join(data_path, _CFG_FILENAME)
-        self._config: list[PSNDevice] = []
-        self._add_handler = add_handler
-        self._remove_handler = remove_handler
-        self.load()
-
-    @property
-    def data_path(self) -> str:
-        """Return the configuration path."""
-        return self._data_path
-
-    def all(self) -> Iterator[PSNDevice]:
-        """Get an iterator for all device configurations."""
-        return iter(self._config)
-
-    def contains(self, psn_id: str) -> bool:
-        """Check if there's a device with the given device identifier."""
-        for item in self._config:
-            if item.identifier == psn_id:
-                return True
-        return False
-
-    def add_or_update(self, psn: PSNDevice) -> None:
-        """
-        Add a new configured PSN Account device and persist configuration.
-
-        The device is updated if it already exists in the configuration.
-        """
-        # duplicate check
-        if not self.update(psn):
-            self._config.append(psn)
-            self.store()
-            if self._add_handler is not None:
-                self._add_handler(psn)
-
-    def get(self, psn_id: str) -> PSNDevice | None:
-        """Get device configuration for given identifier."""
-        for item in self._config:
-            if item.identifier == psn_id:
-                # return a copy
-                return dataclasses.replace(item)
-        return None
-
-    def update(self, psn: PSNDevice) -> bool:
-        """Update a configured PSN Account device and persist configuration."""
-        for item in self._config:
-            if item.identifier == psn.identifier:
-                item.name = psn.name
-                item.npsso = psn.npsso
-                return self.store()
-        return False
-
-    def remove(self, psn_id: str) -> bool:
-        """Remove the given device configuration."""
-        psn = self.get(psn_id)
-        if psn is None:
-            return False
+    def deserialize_device(self, data: dict) -> PSNDevice | None:
+        """Deserialize PSN device from JSON."""
         try:
-            self._config.remove(psn)
-            if self._remove_handler is not None:
-                self._remove_handler(psn)
-            return True
-        except ValueError:
-            pass
-        return False
-
-    def clear(self) -> None:
-        """Remove the configuration file."""
-        self._config = []
-
-        if os.path.exists(self._cfg_file_path):
-            os.remove(self._cfg_file_path)
-
-        if self._remove_handler is not None:
-            self._remove_handler(None)
-
-    def store(self) -> bool:
-        """
-        Store the configuration file.
-
-        :return: True if the configuration could be saved.
-        """
-        try:
-            with open(self._cfg_file_path, "w+", encoding="utf-8") as f:
-                json.dump(self._config, f, ensure_ascii=False, cls=_EnhancedJSONEncoder)
-            return True
-        except OSError as err:
-            _LOG.error("Cannot write the config file: %s", err)
-
-        return False
-
-    def load(self) -> bool:
-        """
-        Load the config into the config global variable.
-
-        :return: True if the configuration could be loaded.
-        """
-        try:
-            with open(self._cfg_file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for item in data:
-                psn = PSNDevice(
-                    item.get("identifier"), item.get("name", ""), item.get("npsso", "")
-                )
-                self._config.append(psn)
-            return True
-        except OSError as err:
-            _LOG.error("Cannot open the config file: %s", err)
-        except (AttributeError, ValueError, TypeError) as err:
-            _LOG.error("Empty or invalid config file: %s", err)
-
-        return False
+            return PSNDevice(
+                identifier=data["identifier"],
+                name=data.get("name", "PlayStation"),
+                npsso=data["npsso"],
+            )
+        except (KeyError, TypeError) as ex:
+            _LOG.error("Failed to deserialize PSN device: %s", ex)
+            return None
 
 
-devices: Devices | None = None
+# Global device manager instance (initialized in main)
+devices: PSNDeviceManager | None = None
