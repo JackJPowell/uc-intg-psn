@@ -14,7 +14,7 @@ from typing import Any, Generic, TypeVar
 
 import ucapi
 import ucapi.api as uc
-from ucapi import EntityTypes, media_player
+from ucapi import media_player
 from .device import BaseDeviceInterface, DeviceEvents
 
 # Type variables for generic device and entity types
@@ -62,51 +62,77 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
 
     def _setup_event_handlers(self) -> None:
         """Register all event handlers with the API."""
-        self.api.listens_to(ucapi.Events.CONNECT)(self._on_r2_connect_cmd)
-        self.api.listens_to(ucapi.Events.DISCONNECT)(self._on_r2_disconnect_cmd)
-        self.api.listens_to(ucapi.Events.ENTER_STANDBY)(self._on_r2_enter_standby)
-        self.api.listens_to(ucapi.Events.EXIT_STANDBY)(self._on_r2_exit_standby)
-        self.api.listens_to(ucapi.Events.SUBSCRIBE_ENTITIES)(
-            self._on_subscribe_entities
-        )
+        self.api.listens_to(ucapi.Events.CONNECT)(self.on_r2_connect_cmd)
+        self.api.listens_to(ucapi.Events.DISCONNECT)(self.on_r2_disconnect_cmd)
+        self.api.listens_to(ucapi.Events.ENTER_STANDBY)(self.on_r2_enter_standby)
+        self.api.listens_to(ucapi.Events.EXIT_STANDBY)(self.on_r2_exit_standby)
+        self.api.listens_to(ucapi.Events.SUBSCRIBE_ENTITIES)(self.on_subscribe_entities)
         self.api.listens_to(ucapi.Events.UNSUBSCRIBE_ENTITIES)(
-            self._on_unsubscribe_entities
+            self.on_unsubscribe_entities
         )
 
     # ========================================================================
-    # Event Handlers (Common implementation)
+    # Remote Two Event Handlers (can be overridden)
     # ========================================================================
 
-    async def _on_r2_connect_cmd(self) -> None:
-        """Connect all configured devices when Remote Two sends connect command."""
+    async def on_r2_connect_cmd(self) -> None:
+        """
+        Handle Remote Two connect command.
+
+        Default implementation: connects all configured devices and sets integration state.
+        Override to add custom logic before/after device connections.
+
+        Example:
+            async def on_r2_connect_cmd(self) -> None:
+                await super().on_r2_connect_cmd()
+                # Custom logic after connect
+        """
         _LOG.debug("Client connect command: connecting device(s)")
         await self.api.set_device_state(ucapi.DeviceStates.CONNECTED)
         for device in self._configured_devices.values():
             await device.connect()
 
-    async def _on_r2_disconnect_cmd(self) -> None:
-        """Disconnect all configured devices when Remote Two sends disconnect command."""
+    async def on_r2_disconnect_cmd(self) -> None:
+        """
+        Handle Remote Two disconnect command.
+
+        Default implementation: disconnects all configured devices.
+        Override to add custom disconnect logic.
+        """
         _LOG.debug("Client disconnect command: disconnecting device(s)")
         for device in self._configured_devices.values():
             await device.disconnect()
 
-    async def _on_r2_enter_standby(self) -> None:
-        """Handle Remote Two entering standby mode."""
+    async def on_r2_enter_standby(self) -> None:
+        """
+        Handle Remote Two entering standby mode.
+
+        Default implementation: disconnects all devices to save resources.
+        Override to customize standby behavior.
+        """
         _LOG.debug("Enter standby event: disconnecting device(s)")
         for device in self._configured_devices.values():
             await device.disconnect()
 
-    async def _on_r2_exit_standby(self) -> None:
-        """Handle Remote Two exiting standby mode."""
+    async def on_r2_exit_standby(self) -> None:
+        """
+        Handle Remote Two exiting standby mode.
+
+        Default implementation: reconnects all configured devices.
+        Override to customize wake behavior.
+        """
         _LOG.debug("Exit standby event: connecting device(s)")
         for device in self._configured_devices.values():
             await device.connect()
 
-    async def _on_subscribe_entities(self, entity_ids: list[str]) -> None:
+    async def on_subscribe_entities(self, entity_ids: list[str]) -> None:
         """
-        Subscribe to given entities.
+        Handle entity subscription events.
 
-        :param entity_ids: entity identifiers.
+        Default implementation: adds devices for subscribed entities and updates their state.
+        Override to customize subscription behavior.
+
+        :param entity_ids: List of entity identifiers being subscribed
         """
         _LOG.debug("Subscribe entities event: %s", entity_ids)
 
@@ -142,11 +168,14 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
                     "Failed to subscribe entity %s: no device config found", entity_id
                 )
 
-    async def _on_unsubscribe_entities(self, entity_ids: list[str]) -> None:
+    async def on_unsubscribe_entities(self, entity_ids: list[str]) -> None:
         """
-        Handle entity unsubscribe events.
+        Handle entity unsubscription events.
 
-        Only disconnects and cleans up a device if ALL its entities are unsubscribed.
+        Default implementation: disconnects and cleans up devices when all their
+        entities are unsubscribed. Override to customize cleanup behavior.
+
+        :param entity_ids: List of entity identifiers being unsubscribed
         """
         _LOG.debug("Unsubscribe entities event: %s", entity_ids)
 
@@ -224,10 +253,10 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
     def setup_device_event_handlers(self, device: DeviceT) -> None:
         """
         Attach event handlers to device.
-        
+
         Override this method to add custom event handlers. Call super() first
         to register the default handlers, then add your custom ones.
-        
+
         :param device: Device instance
         """
         device.events.on(DeviceEvents.CONNECTED, self.on_device_connected)
@@ -240,7 +269,7 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
     ) -> None:
         """
         Register available entities for a device.
-        
+
         Override this method to customize entity registration logic. Call super()
         to use the default implementation that calls create_entities().
 
@@ -286,14 +315,9 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
                 _LOG.debug("Entity %s is not configured, ignoring", entity_id)
                 continue
 
-            if configured_entity.entity_type == EntityTypes.MEDIA_PLAYER:
-                self.api.configured_entities.update_attributes(
-                    entity_id, {media_player.Attributes.STATE: state}
-                )
-            elif configured_entity.entity_type == EntityTypes.REMOTE:
-                self.api.configured_entities.update_attributes(
-                    entity_id, {ucapi.remote.Attributes.STATE: state}
-                )
+            self.api.configured_entities.update_attributes(
+                entity_id, {media_player.Attributes.STATE: state}
+            )  # Use media_player state as a stand-in
 
         await self.api.set_device_state(ucapi.DeviceStates.CONNECTED)
 
@@ -310,16 +334,10 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
             if configured_entity is None:
                 continue
 
-            if configured_entity.entity_type == EntityTypes.MEDIA_PLAYER:
-                self.api.configured_entities.update_attributes(
-                    entity_id,
-                    {media_player.Attributes.STATE: media_player.States.UNAVAILABLE},
-                )
-            elif configured_entity.entity_type == EntityTypes.REMOTE:
-                self.api.configured_entities.update_attributes(
-                    entity_id,
-                    {ucapi.remote.Attributes.STATE: ucapi.remote.States.UNAVAILABLE},
-                )
+            self.api.configured_entities.update_attributes(
+                entity_id,
+                {media_player.Attributes.STATE: media_player.States.UNAVAILABLE},
+            )  # Use media_player state as a stand-in
 
     async def on_device_connection_error(self, device_id: str, message: str) -> None:
         """
@@ -335,16 +353,10 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
             if configured_entity is None:
                 continue
 
-            if configured_entity.entity_type == EntityTypes.MEDIA_PLAYER:
-                self.api.configured_entities.update_attributes(
-                    entity_id,
-                    {media_player.Attributes.STATE: media_player.States.UNAVAILABLE},
-                )
-            elif configured_entity.entity_type == EntityTypes.REMOTE:
-                self.api.configured_entities.update_attributes(
-                    entity_id,
-                    {ucapi.remote.Attributes.STATE: ucapi.remote.States.UNAVAILABLE},
-                )
+            self.api.configured_entities.update_attributes(
+                entity_id,
+                {media_player.Attributes.STATE: media_player.States.UNAVAILABLE},
+            )  # Use media_player state as a stand-in
 
         await self.api.set_device_state(ucapi.DeviceStates.ERROR)
 
@@ -365,28 +377,6 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
 
         # Default implementation - integrations should override for specific behavior
         _LOG.debug("[%s] Device update: %s", device_id, update)
-
-    # ========================================================================
-    # Abstract Methods (Must be implemented by subclasses)
-    # ========================================================================
-
-    @abstractmethod
-    def device_from_entity_id(self, entity_id: str) -> str | None:
-        """
-        Extract device identifier from entity identifier.
-
-        :param entity_id: Entity identifier (e.g., "media_player.device_123")
-        :return: Device identifier or None
-        """
-
-    @abstractmethod
-    def get_entity_ids_for_device(self, device_id: str) -> list[str]:
-        """
-        Get all entity identifiers for a device.
-
-        :param device_id: Device identifier
-        :return: List of entity identifiers
-        """
 
     def get_device_config(self, device_id: str) -> ConfigT | None:
         """
@@ -478,6 +468,28 @@ class BaseIntegrationDriver(ABC, Generic[DeviceT, ConfigT]):
             f"Device config {type(device_config).__name__} has no 'address', 'friendly_address', 'ip_address', 'device_address', or 'host' attribute. "
             f"Override get_device_address() to specify which attribute to use."
         )
+
+    # ========================================================================
+    # Abstract Methods (Must be implemented by subclasses)
+    # ========================================================================
+
+    @abstractmethod
+    def device_from_entity_id(self, entity_id: str) -> str | None:
+        """
+        Extract device identifier from entity identifier.
+
+        :param entity_id: Entity identifier (e.g., "media_player.device_123")
+        :return: Device identifier or None
+        """
+
+    @abstractmethod
+    def get_entity_ids_for_device(self, device_id: str) -> list[str]:
+        """
+        Get all entity identifiers for a device.
+
+        :param device_id: Device identifier
+        :return: List of entity identifiers
+        """
 
     @abstractmethod
     def map_device_state(self, device_state: Any) -> media_player.States:
