@@ -1,7 +1,7 @@
 """
 Setup flow for PlayStation Network integration.
 
-:copyright: (c) 2023-2024
+:copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 

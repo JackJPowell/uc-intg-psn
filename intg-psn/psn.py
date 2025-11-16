@@ -3,7 +3,7 @@ This module implements the PlayStation Network communication of the Remote integ
 
 Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from the Home Assistant
 
-:copyright: (c) 2023-2024
+:copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
@@ -143,8 +143,6 @@ class PSNAccount(PollingDevice):
     @property
     def identifier(self) -> str:
         """Return the device identifier."""
-        if not self._device_config.identifier:
-            raise ValueError("Instance not initialized, no identifier available")
         return self._device_config.identifier
 
     @property
@@ -163,6 +161,11 @@ class PSNAccount(PollingDevice):
         if self._psn and self._psn_data and self._psn_data.available is True:
             return True
         return False
+
+    @property
+    def log_id(self) -> str:
+        """Return a log identifier for this device."""
+        return self._device_config.name
 
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
@@ -186,10 +189,7 @@ class PSNAccount(PollingDevice):
         """Disconnect from PSN."""
         _LOG.debug("[%s] Disconnecting from device", self.log_id)
 
-        # Call base class disconnect to stop polling
         await super().disconnect()
-
-        # Clean up PSN connection
         if self._psn:
             try:
                 self._psn.close()
@@ -221,7 +221,6 @@ class PSNAccount(PollingDevice):
                 )
                 return
 
-            # Build update dictionary
             update = {"state": "OFF"}
 
             if (

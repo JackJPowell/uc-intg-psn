@@ -1,7 +1,7 @@
 """
 PSN Integration Driver using ucapi_base framework.
 
-:copyright: (c) 2023-2024 by Unfolded Circle ApS.
+:copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
@@ -156,24 +156,13 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
 
 async def main():
     """Start the Remote Two integration driver."""
-    # Configure root logger level from environment
     logging.basicConfig()
 
     level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
-    # Set specific loggers
     logging.getLogger("psn").setLevel(level)
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("config").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
-
-    # Aggressively suppress ucapi logging
-    class SuppressUcapiFilter(logging.Filter):
-        def filter(self, record):
-            return not record.name.startswith("ucapi")
-
-    # Add filter to root logger to block all ucapi logs
-    root_logger = logging.getLogger()
-    root_logger.addFilter(SuppressUcapiFilter())
 
     driver = PSNIntegrationDriver(_LOOP)
 
