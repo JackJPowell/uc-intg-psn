@@ -25,6 +25,9 @@ from ucapi import (
     UserDataResponse,
 )
 
+from .discovery import DiscoveredDevice
+from .config import BaseDeviceManager
+
 _LOG = logging.getLogger(__name__)
 
 # Type variable for device configuration
@@ -36,11 +39,12 @@ class SetupSteps(IntEnum):
 
     INIT = 0
     CONFIGURATION_MODE = 1
-    DISCOVER = 2
-    DEVICE_CHOICE = 3
-    MANUAL_ENTRY = 4
-    BACKUP = 5
-    RESTORE = 6
+    PRE_DISCOVERY = 2
+    DISCOVER = 3
+    DEVICE_CHOICE = 4
+    MANUAL_ENTRY = 5
+    BACKUP = 6
+    RESTORE = 7
 
 
 class BaseSetupFlow(ABC, Generic[ConfigT]):
@@ -57,7 +61,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         ConfigT: The device configuration class
     """
 
-    def __init__(self, config_manager, discovery_class=None):
+    def __init__(self, config_manager: BaseDeviceManager, discovery_class=None):
         """
         Initialize the setup flow.
 
@@ -69,6 +73,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         self._setup_step = SetupSteps.INIT
         self._add_mode = False
         self._pending_device_config: ConfigT | None = None  # For multi-screen flows
+        self._pre_discovery_data: dict[str, Any] = {}  # Store data from pre-discovery screens
 
     @classmethod
     def create_handler(cls, config_manager, discovery_class=None):
@@ -136,6 +141,15 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
 
         # Initial setup - clear configuration and start discovery
         self.config.clear()
+        self._pre_discovery_data = {}
+        
+        # Check if pre-discovery screen is needed
+        pre_discovery_screen = await self.get_pre_discovery_screen()
+        if pre_discovery_screen is not None:
+            self._setup_step = SetupSteps.PRE_DISCOVERY
+            return pre_discovery_screen
+        
+        # No pre-discovery needed, go straight to discovery
         self._setup_step = SetupSteps.DISCOVER
         return await self._handle_discovery()
 
@@ -155,6 +169,9 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             and "action" in msg.input_values
         ):
             return await self._handle_configuration_mode(msg)
+
+        if self._setup_step == SetupSteps.PRE_DISCOVERY:
+            return await self._handle_pre_discovery_response(msg)
 
         if self._setup_step == SetupSteps.DISCOVER and "choice" in msg.input_values:
             choice = msg.input_values["choice"]
@@ -273,6 +290,14 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         match action:
             case "add":
                 self._add_mode = True
+                self._pre_discovery_data = {}
+                
+                # Check if pre-discovery screen is needed
+                pre_discovery_screen = await self.get_pre_discovery_screen()
+                if pre_discovery_screen is not None:
+                    self._setup_step = SetupSteps.PRE_DISCOVERY
+                    return pre_discovery_screen
+                
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -281,6 +306,15 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
                 if not self.config.remove(choice):
                     _LOG.warning("Could not update device: %s", choice)
                     return SetupError(error_type=IntegrationSetupError.OTHER)
+                
+                self._pre_discovery_data = {}
+                
+                # Check if pre-discovery screen is needed
+                pre_discovery_screen = await self.get_pre_discovery_screen()
+                if pre_discovery_screen is not None:
+                    self._setup_step = SetupSteps.PRE_DISCOVERY
+                    return pre_discovery_screen
+                
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -294,6 +328,14 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
 
             case "reset":
                 self.config.clear()
+                self._pre_discovery_data = {}
+                
+                # Check if pre-discovery screen is needed
+                pre_discovery_screen = await self.get_pre_discovery_screen()
+                if pre_discovery_screen is not None:
+                    self._setup_step = SetupSteps.PRE_DISCOVERY
+                    return pre_discovery_screen
+                
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -306,6 +348,38 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             case _:
                 _LOG.error("Invalid configuration action: %s", action)
                 return SetupError(error_type=IntegrationSetupError.OTHER)
+
+    async def _handle_pre_discovery_response(
+        self, msg: UserDataResponse
+    ) -> SetupAction:
+        """
+        Internal handler for pre-discovery screens.
+
+        Calls the overridable handle_pre_discovery_response and proceeds to
+        discovery if it returns None, or shows another screen if returned.
+
+        :param msg: User data response
+        :return: Setup action
+        """
+        try:
+            # Store the input values
+            self._pre_discovery_data.update(msg.input_values)
+
+            # Call the overridable method
+            result = await self.handle_pre_discovery_response(msg)
+
+            # If it returns a screen, show it
+            if result is not None:
+                return result
+
+            # If it returns None, proceed to discovery
+            self._setup_step = SetupSteps.DISCOVER
+            return await self._handle_discovery()
+
+        except Exception as err:  # pylint: disable=broad-except
+            _LOG.error("Error in pre-discovery configuration: %s", err)
+            self._pre_discovery_data = {}
+            return SetupError(error_type=IntegrationSetupError.OTHER)
 
     async def _handle_discovery(self) -> RequestUserInput:
         """
@@ -358,6 +432,42 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         # No devices found, show manual entry
         return await self._handle_manual_entry()
 
+    async def _finalize_device_setup(
+        self, device_config: ConfigT, input_values: dict[str, Any]
+    ) -> SetupComplete | SetupError | RequestUserInput:
+        """
+        Common logic to finalize device setup after creation.
+
+        Checks for duplicates, handles additional configuration screens,
+        and saves the device configuration.
+
+        :param device_config: Device configuration to finalize
+        :param input_values: User input values from the previous screen
+        :return: Setup action
+        """
+        # Check for duplicates in add mode
+        if self._add_mode and self.config.contains(self.get_device_id(device_config)):
+            _LOG.warning(
+                "Device already configured: %s", self.get_device_id(device_config)
+            )
+            return SetupError(error_type=IntegrationSetupError.OTHER)
+
+        # Store pending config and check if additional configuration needed
+        self._pending_device_config = device_config
+        additional_screen = await self.get_additional_configuration_screen(
+            device_config, input_values
+        )
+        if additional_screen is not None:
+            return additional_screen
+
+        # No additional screens, save and complete
+        self.config.add_or_update(self._pending_device_config)
+        self._pending_device_config = None
+
+        await asyncio.sleep(1)
+        _LOG.info("Setup completed for %s", self.get_device_name(device_config))
+        return SetupComplete()
+
     async def _handle_device_selection(
         self, msg: UserDataResponse
     ) -> SetupComplete | SetupError | RequestUserInput:
@@ -379,29 +489,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             device_config = await self.create_device_from_discovery(
                 device_id, additional_data
             )
-
-            # Check for duplicates in add mode
-            if self._add_mode and self.config.contains(
-                self.get_device_id(device_config)
-            ):
-                _LOG.warning("Device already configured: %s", device_id)
-                return SetupError(error_type=IntegrationSetupError.OTHER)
-
-            # Store pending config and check if additional configuration needed
-            self._pending_device_config = device_config
-            additional_screen = await self.get_additional_configuration_screen(
-                device_config, msg.input_values
-            )
-            if additional_screen is not None:
-                return additional_screen
-
-            # No additional screens, save and complete
-            self.config.add_or_update(self._pending_device_config)
-            self._pending_device_config = None
-
-            await asyncio.sleep(1)
-            _LOG.info("Setup completed for %s", self.get_device_name(device_config))
-            return SetupComplete()
+            return await self._finalize_device_setup(device_config, msg.input_values)
 
         except Exception as err:  # pylint: disable=broad-except
             _LOG.error("Setup error: %s", err)
@@ -424,29 +512,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         """
         try:
             device_config = await self.create_device_from_manual_entry(msg.input_values)
-
-            # Check for duplicates in add mode
-            if self._add_mode and self.config.contains(
-                self.get_device_id(device_config)
-            ):
-                _LOG.warning("Device already configured")
-                return SetupError(error_type=IntegrationSetupError.OTHER)
-
-            # Store pending config and check if additional configuration needed
-            self._pending_device_config = device_config
-            additional_screen = await self.get_additional_configuration_screen(
-                device_config, msg.input_values
-            )
-            if additional_screen is not None:
-                return additional_screen
-
-            # No additional screens, save and complete
-            self.config.add_or_update(self._pending_device_config)
-            self._pending_device_config = None
-
-            await asyncio.sleep(1)
-            _LOG.info("Setup completed for %s", self.get_device_name(device_config))
-            return SetupComplete()
+            return await self._finalize_device_setup(device_config, msg.input_values)
 
         except Exception as err:  # pylint: disable=broad-except
             _LOG.error("Setup error: %s", err)
@@ -598,7 +664,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
     # ========================================================================
 
     @abstractmethod
-    async def discover_devices(self) -> list[Any]:
+    async def discover_devices(self) -> list[DiscoveredDevice]:
         """
         Perform device discovery.
 
@@ -635,6 +701,10 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
 
         :return: RequestUserInput with manual entry fields
         """
+
+    # ========================================================================
+    # Optional Override Methods
+    # ========================================================================
 
     def get_device_id(self, device_config: ConfigT) -> str:
         """
@@ -680,10 +750,6 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             f"Override get_device_name() to specify which attribute to use."
         )
 
-    # ========================================================================
-    # Optional Override Methods
-    # ========================================================================
-
     def get_additional_discovery_fields(self) -> list[dict]:
         """
         Get additional fields to show during discovery.
@@ -700,13 +766,59 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         """
         Extract additional setup data from input values.
 
-        Override to extract custom fields from discovery screen.
+        Override to extract additional custom fields.
 
         :param input_values: User input values
         :return: Dictionary of additional data
         """
         _ = input_values  # Mark as intentionally unused
         return {}
+
+    async def get_pre_discovery_screen(self) -> RequestUserInput | None:
+        """
+        Request pre-discovery configuration screen(s).
+
+        Override this method to show configuration screens BEFORE device discovery.
+        This is useful for collecting credentials, API keys, server addresses, or
+        other information needed to perform discovery.
+
+        The collected data is stored in self._pre_discovery_data and can be accessed
+        during discovery (in discover_devices()) or device creation.
+
+        To show a pre-discovery screen:
+        1. Return a RequestUserInput with the fields you need
+        2. Handle the response in handle_pre_discovery_response()
+        3. Return another RequestUserInput to show more screens, or None to proceed
+
+        :return: RequestUserInput to show a screen, or None to skip pre-discovery
+        """
+        return None
+
+    async def handle_pre_discovery_response(
+        self, msg: UserDataResponse
+    ) -> SetupAction:
+        """
+        Handle response from pre-discovery screens.
+
+        Override this method to process responses from screens created by
+        get_pre_discovery_screen(). The input values are automatically stored
+        in self._pre_discovery_data before this method is called.
+
+        You should:
+        1. Validate the input (optionally)
+        2. Either:
+           - Return another RequestUserInput for more pre-discovery screens, or
+           - Return None to proceed to device discovery
+
+        If you return None, the base class will call discover_devices() where
+        you can access self._pre_discovery_data to use the collected information.
+
+        :param msg: User data response from pre-discovery screen
+        :return: RequestUserInput for another screen, or None to proceed to discovery
+        """
+        _ = msg  # Mark as intentionally unused
+        # Default: No additional handling, proceed to discovery
+        return None
 
     async def get_additional_configuration_screen(
         self, device_config: ConfigT, previous_input: dict[str, Any]
