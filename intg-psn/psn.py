@@ -80,11 +80,10 @@ class PlaystationNetwork:
                 if session and not session.closed:
                     # Schedule the session close in the event loop
                     try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
+                        if self._loop.is_running():
                             asyncio.create_task(session.close())
                         else:
-                            loop.run_until_complete(session.close())
+                            self._loop.run_until_complete(session.close())
                     except Exception as ex:  # pylint: disable=broad-exception-caught
                         _LOG.debug("Error closing session: %s", ex)
         except Exception as ex:  # pylint: disable=broad-exception-caught
@@ -165,13 +164,13 @@ class PSNAccount(PollingDevice):
             return True
         return False
 
-    async def _establish_connection(self) -> None:
+    async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
         try:
             self._psn = PlaystationNetwork(self._device_config.npsso)
             _LOG.debug("[%s] PSN connection established", self.log_id)
             # Do initial attribute update
-            await self._poll_device()
+            await self.poll_device()
         except PSNAWPAuthenticationError as ex:
             _LOG.error(
                 "[%s] NPSSO Token has expired. Please rerun setup to update. %s",
@@ -201,7 +200,7 @@ class PSNAccount(PollingDevice):
             finally:
                 self._psn = None
 
-    async def _poll_device(self) -> None:
+    async def poll_device(self) -> None:
         """
         Poll the device for status updates - called by base class.
 

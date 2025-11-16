@@ -18,15 +18,16 @@ _PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-import setup_flow  # noqa: E402
 import config  # noqa: E402
 from config import PSNDevice  # noqa: E402
 from media_player import PSNMediaPlayer  # noqa: E402
 from psn import PSNAccount  # noqa: E402
+from setup_flow import PSNSetupFlow  # noqa: E402
 from ucapi import media_player  # noqa: E402
 from ucapi_base import BaseIntegrationDriver  # noqa: E402
 
-_LOG = logging.getLogger(__name__)
+_LOG = logging.getLogger("driver")
+_LOOP = asyncio.get_event_loop()
 
 
 class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
@@ -45,7 +46,6 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
         super().__init__(
             loop=loop, device_class=PSNAccount, entity_classes=[PSNMediaPlayer]
         )
-        self.config_manager: config.PSNDeviceManager | None = None
 
     # ========================================================================
     # Required Abstract Method Implementations
@@ -69,50 +69,9 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
         PSN has one media_player entity per account.
 
         :param device_id: Device identifier (account_id)
-        :return: List containing single entity ID
+        :return: List containing entity IDs
         """
         return [device_id]
-
-    def get_device_config(self, device_id: str) -> PSNDevice | None:
-        """
-        Get device configuration for the given device ID.
-
-        :param device_id: Device identifier (account_id)
-        :return: PSN device configuration or None
-        """
-        if self.config_manager is None:
-            _LOG.error("Config manager not initialized")
-            return None
-        return self.config_manager.get(device_id)
-
-    def get_device_id(self, device_config: PSNDevice) -> str:
-        """
-        Extract device ID from device configuration.
-
-        :param device_config: PSN device configuration
-        :return: Device identifier (account_id)
-        """
-        return device_config.identifier
-
-    def get_device_name(self, device_config: PSNDevice) -> str:
-        """
-        Extract device name from device configuration.
-
-        :param device_config: PSN device configuration
-        :return: Device name (online_id)
-        """
-        return device_config.name
-
-    def get_device_address(self, device_config: PSNDevice) -> str:
-        """
-        Extract device address from device configuration.
-
-        PSN doesn't have a physical address, return identifier.
-
-        :param device_config: PSN device configuration
-        :return: Device identifier
-        """
-        return device_config.identifier
 
     def map_device_state(self, device_state: Any) -> media_player.States:
         """
@@ -194,66 +153,47 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
             elif self.api.available_entities.contains(entity_id):
                 self.api.available_entities.update_attributes(entity_id, attributes)
 
-    # ========================================================================
-    # Device Lifecycle Callbacks
-    # ========================================================================
-
-    def on_device_added(self, device: PSNDevice) -> None:
-        """
-        Handle a newly added device in the configuration.
-
-        :param device: PSN device configuration
-        """
-        _LOG.debug("New device added: %s", device)
-        self.add_configured_device(device, connect=False)
-
-    def on_device_removed(self, device: PSNDevice | None) -> None:
-        """
-        Handle a removed device in the configuration.
-
-        :param device: PSN device configuration or None (clear all)
-        """
-        if device is None:
-            _LOG.debug("Configuration cleared, removing all PSN devices")
-            self.clear_devices()
-        else:
-            _LOG.debug("Removing PSN device: %s", device.identifier)
-            self.remove_device(device.identifier)
-
 
 async def main():
     """Start the Remote Two integration driver."""
+    # Configure root logger level from environment
     logging.basicConfig()
 
     level = os.getenv("UC_LOG_LEVEL", "DEBUG").upper()
+    # Set specific loggers
     logging.getLogger("psn").setLevel(level)
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("config").setLevel(level)
-    logging.getLogger("discover").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
 
-    # Create event loop and driver
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # Aggressively suppress ucapi logging
+    class SuppressUcapiFilter(logging.Filter):
+        def filter(self, record):
+            return not record.name.startswith("ucapi")
 
-    driver = PSNIntegrationDriver(loop)
+    # Add filter to root logger to block all ucapi logs
+    root_logger = logging.getLogger()
+    root_logger.addFilter(SuppressUcapiFilter())
+
+    driver = PSNIntegrationDriver(_LOOP)
 
     # Initialize configuration manager with device callbacks
-    config.devices = config.PSNDeviceManager(
+    driver.config = config.PSNDeviceManager(
         driver.api.config_dir_path, driver.on_device_added, driver.on_device_removed
     )
-    driver.config_manager = config.devices
 
     # Load and register all configured devices
-    for device in config.devices.all():
+    loaded_devices = list(driver.config.all())
+    _LOG.info("Loaded %d configured device(s)", len(loaded_devices))
+    for device in loaded_devices:
         driver.add_configured_device(device, connect=False)
 
-    # Initialize the API with setup handler
-    await driver.api.init("driver.json", setup_flow.driver_setup_handler)
+    # Create setup handler using base class factory method
+    setup_handler = PSNSetupFlow.create_handler(driver.config)
+
+    await driver.api.init("driver.json", setup_handler)
 
 
 if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
-    loop.run_forever()
+    _LOOP.run_until_complete(main())
+    _LOOP.run_forever()

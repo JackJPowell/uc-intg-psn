@@ -36,10 +36,6 @@ class PSNDevice:
 class PSNDeviceManager(BaseDeviceManager[PSNDevice]):
     """Configuration manager for PSN Account devices."""
 
-    def get_device_id(self, device: PSNDevice) -> str:
-        """Extract device ID from PSN device."""
-        return device.identifier
-
     def deserialize_device(self, data: dict) -> PSNDevice | None:
         """Deserialize PSN device from JSON."""
         try:
@@ -51,7 +47,3 @@ class PSNDeviceManager(BaseDeviceManager[PSNDevice]):
         except (KeyError, TypeError) as ex:
             _LOG.error("Failed to deserialize PSN device: %s", ex)
             return None
-
-
-# Global device manager instance (initialized in main)
-devices: PSNDeviceManager | None = None

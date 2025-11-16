@@ -16,11 +16,10 @@ _PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
 if _PARENT_DIR not in sys.path:
     sys.path.insert(0, _PARENT_DIR)
 
-import config  # noqa: E402
 from config import PSNDevice  # noqa: E402
 from psn import PlaystationNetwork  # noqa: E402
 from psnawp_api.utils.misc import parse_npsso_token  # noqa: E402
-from ucapi import RequestUserInput, SetupDriver  # noqa: E402
+from ucapi import RequestUserInput  # noqa: E402
 from ucapi_base import BaseSetupFlow  # noqa: E402
 
 _LOG = logging.getLogger(__name__)
@@ -129,48 +128,3 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
                 },
             ],
         )
-
-    def get_device_id(self, device_config: PSNDevice) -> str:
-        """
-        Extract device ID from PSN device configuration.
-
-        :param device_config: PSN device configuration
-        :return: Device identifier (account ID)
-        """
-        return device_config.identifier
-
-    def get_device_name(self, device_config: PSNDevice) -> str:
-        """
-        Extract device name from PSN device configuration.
-
-        :param device_config: PSN device configuration
-        :return: Device name (online ID)
-        """
-        return device_config.name
-
-
-# Global setup flow instance
-_setup_flow: PSNSetupFlow | None = None
-
-
-async def driver_setup_handler(msg: SetupDriver):
-    """
-    Entry point for driver setup requests.
-
-    :param msg: Setup driver request object
-    :return: Setup action on how to continue
-    """
-    global _setup_flow
-
-    _LOG.info("=== SETUP HANDLER CALLED === msg type: %s", type(msg).__name__)
-    _LOG.debug("Setup message: %s", msg)
-
-    if _setup_flow is None:
-        _LOG.info(
-            "Creating new PSNSetupFlow instance with config.devices=%s", config.devices
-        )
-        _setup_flow = PSNSetupFlow(config.devices)
-
-    result = await _setup_flow.handle_driver_setup(msg)
-    _LOG.info("Setup handler returning: %s", type(result).__name__)
-    return result
