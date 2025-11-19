@@ -42,27 +42,6 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
         # PSN has no discovery, pass None for discovery_class
         super().__init__(config_manager, discovery_class=None)
 
-    async def discover_devices(self) -> list[Any]:
-        """
-        PSN does not support device discovery.
-
-        :return: Empty list (no discovery available)
-        """
-        return []
-
-    async def create_device_from_discovery(
-        self, device_id: str, additional_data: dict[str, Any]
-    ) -> PSNDevice:
-        """
-        Not used for PSN (no discovery support).
-
-        :param device_id: Device identifier
-        :param additional_data: Additional data
-        :return: PSN device configuration
-        :raises NotImplementedError: PSN doesn't support discovery
-        """
-        raise NotImplementedError("PSN does not support device discovery")
-
     async def create_device_from_manual_entry(
         self, input_values: dict[str, Any]
     ) -> PSNDevice:
