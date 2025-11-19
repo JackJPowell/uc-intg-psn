@@ -25,7 +25,7 @@ from ucapi import (
     UserDataResponse,
 )
 
-from .discovery import DiscoveredDevice
+from .discovery import DiscoveredDevice, BaseDiscovery
 from .config import BaseDeviceManager
 
 _LOG = logging.getLogger(__name__)
@@ -61,19 +61,24 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         ConfigT: The device configuration class
     """
 
-    def __init__(self, config_manager: BaseDeviceManager, discovery_class=None):
+    def __init__(
+        self, config_manager: BaseDeviceManager, discovery_class: BaseDiscovery | None
+    ):
         """
         Initialize the setup flow.
 
         :param config_manager: Device configuration manager instance
-        :param discovery_class: Optional discovery class for auto-discovery
+        :param discovery_class: Discovery class instance for auto-discovery.
+                               Pass None if the device does not support discovery.
         """
         self.config = config_manager
         self.discovery = discovery_class
         self._setup_step = SetupSteps.INIT
         self._add_mode = False
         self._pending_device_config: ConfigT | None = None  # For multi-screen flows
-        self._pre_discovery_data: dict[str, Any] = {}  # Store data from pre-discovery screens
+        self._pre_discovery_data: dict[
+            str, Any
+        ] = {}  # Store data from pre-discovery screens
 
     @classmethod
     def create_handler(cls, config_manager, discovery_class=None):
@@ -84,7 +89,8 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         the setup flow instance, suitable for passing to IntegrationAPI.init().
 
         :param config_manager: Device configuration manager instance
-        :param discovery_class: Optional discovery class for auto-discovery
+        :param discovery_class: Optional initialized discovery class instance for auto-discovery.
+                               Pass None if the device does not support discovery.
         :return: Async function that handles SetupDriver messages
         """
         setup_flow = None
@@ -142,13 +148,13 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         # Initial setup - clear configuration and start discovery
         self.config.clear()
         self._pre_discovery_data = {}
-        
+
         # Check if pre-discovery screen is needed
         pre_discovery_screen = await self.get_pre_discovery_screen()
         if pre_discovery_screen is not None:
             self._setup_step = SetupSteps.PRE_DISCOVERY
             return pre_discovery_screen
-        
+
         # No pre-discovery needed, go straight to discovery
         self._setup_step = SetupSteps.DISCOVER
         return await self._handle_discovery()
@@ -291,13 +297,13 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             case "add":
                 self._add_mode = True
                 self._pre_discovery_data = {}
-                
+
                 # Check if pre-discovery screen is needed
                 pre_discovery_screen = await self.get_pre_discovery_screen()
                 if pre_discovery_screen is not None:
                     self._setup_step = SetupSteps.PRE_DISCOVERY
                     return pre_discovery_screen
-                
+
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -306,15 +312,15 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
                 if not self.config.remove(choice):
                     _LOG.warning("Could not update device: %s", choice)
                     return SetupError(error_type=IntegrationSetupError.OTHER)
-                
+
                 self._pre_discovery_data = {}
-                
+
                 # Check if pre-discovery screen is needed
                 pre_discovery_screen = await self.get_pre_discovery_screen()
                 if pre_discovery_screen is not None:
                     self._setup_step = SetupSteps.PRE_DISCOVERY
                     return pre_discovery_screen
-                
+
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -329,13 +335,13 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
             case "reset":
                 self.config.clear()
                 self._pre_discovery_data = {}
-                
+
                 # Check if pre-discovery screen is needed
                 pre_discovery_screen = await self.get_pre_discovery_screen()
                 if pre_discovery_screen is not None:
                     self._setup_step = SetupSteps.PRE_DISCOVERY
                     return pre_discovery_screen
-                
+
                 self._setup_step = SetupSteps.DISCOVER
                 return await self._handle_discovery()
 
@@ -664,26 +670,6 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
     # ========================================================================
 
     @abstractmethod
-    async def discover_devices(self) -> list[DiscoveredDevice]:
-        """
-        Perform device discovery.
-
-        :return: List of discovered devices
-        """
-
-    @abstractmethod
-    async def create_device_from_discovery(
-        self, device_id: str, additional_data: dict[str, Any]
-    ) -> ConfigT:
-        """
-        Create device configuration from discovered device.
-
-        :param device_id: Discovered device identifier
-        :param additional_data: Additional user input data
-        :return: Device configuration
-        """
-
-    @abstractmethod
     async def create_device_from_manual_entry(
         self, input_values: dict[str, Any]
     ) -> ConfigT:
@@ -701,6 +687,89 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
 
         :return: RequestUserInput with manual entry fields
         """
+
+    # ========================================================================
+    # Discovery Methods (Override if discovery is supported)
+    # ========================================================================
+
+    async def discover_devices(self) -> list[DiscoveredDevice]:
+        """
+        Perform device discovery.
+
+        DEFAULT IMPLEMENTATION: Calls self.discovery.discover() if available.
+
+        If a discovery_class was passed to __init__, this method will call its
+        discover() method and return the results. If no discovery_class was provided
+        (None), this returns an empty list and the setup flow will skip discovery.
+
+        :return: List of discovered devices, or empty list if discovery not supported
+        """
+        if self.discovery is None:
+            _LOG.info(
+                "%s: No discovery class provided - using manual entry only",
+                self.__class__.__name__,
+            )
+            return []
+
+        _LOG.debug(
+            "%s: Running discovery using %s",
+            self.__class__.__name__,
+            type(self.discovery).__name__,
+        )
+
+        try:
+            devices = await self.discovery.discover()
+            _LOG.info(
+                "%s: Discovered %d device(s)", self.__class__.__name__, len(devices)
+            )
+            return devices
+        except Exception as err:  # pylint: disable=broad-except
+            _LOG.info("%s: Discovery failed: %s", self.__class__.__name__, err)
+            return []
+
+    async def create_device_from_discovery(
+        self, device_id: str, additional_data: dict[str, Any]
+    ) -> ConfigT:
+        """
+        Create device configuration from discovered device.
+
+        DEFAULT IMPLEMENTATION: Raises NotImplementedError.
+
+        **You must override this method if you provide a discovery_class.**
+
+        This method is called when a user selects a discovered device from the
+        dropdown. If you pass a discovery_class to __init__, you MUST override
+        this method to create a configuration from the discovered device data.
+
+        :param device_id: Discovered device identifier
+        :param additional_data: Additional user input data
+        :return: Device configuration
+        :raises NotImplementedError: If not overridden when discovery_class is provided
+        """
+        if self.discovery is None:
+            # This shouldn't happen since _handle_discovery checks for None,
+            # but we'll be defensive
+            _LOG.error(
+                "%s: create_device_from_discovery() called but no discovery class was provided",
+                self.__class__.__name__,
+            )
+            raise NotImplementedError(
+                f"{self.__class__.__name__}: Cannot create device from discovery "
+                "because no discovery_class was provided to __init__()"
+            )
+
+        _ = device_id  # Mark as intentionally unused
+        _ = additional_data
+
+        _LOG.error(
+            "%s: create_device_from_discovery() called but not overridden - "
+            "you must implement this method when using a discovery_class",
+            self.__class__.__name__,
+        )
+        raise NotImplementedError(
+            f"{self.__class__.__name__}.create_device_from_discovery() must be "
+            f"overridden when using discovery_class ({type(self.discovery).__name__})"
+        )
 
     # ========================================================================
     # Optional Override Methods
@@ -794,9 +863,7 @@ class BaseSetupFlow(ABC, Generic[ConfigT]):
         """
         return None
 
-    async def handle_pre_discovery_response(
-        self, msg: UserDataResponse
-    ) -> SetupAction:
+    async def handle_pre_discovery_response(self, msg: UserDataResponse) -> SetupAction:
         """
         Handle response from pre-discovery screens.
 

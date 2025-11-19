@@ -1,305 +1,182 @@
-# UCAPI Base - Base Classes for Unfolded Circle Integrations
+# UCAPI Base
 
-A comprehensive framework for building Unfolded Circle Remote Two integration drivers with reusable base classes.
+A framework for building Unfolded Circle Remote integrations that handles the repetitive parts of integration development so you can focus on what's important.
 
-## Overview
+## What This Solves
 
-This module provides battle-tested base classes that handle common patterns across integrations:
+Building an Unfolded Circle Remote integration typically involves:
+- Writing 200+ lines of setup flow routing logic
+- Manually managing configuration updates and persistence
+- Implementing device lifecycle management (connect/disconnect/reconnect)
+- Wiring up Remote event handlers
+- Managing global state for devices and entities
+- Handling entity registration and state synchronization
 
-- **Driver Management** - Event handlers, device lifecycle, entity registration
-- **Setup Flows** - Configuration mode, discovery, manual entry
-- **Device Configuration** - CRUD operations, JSON persistence, backup/restore
-- **Device Interfaces** - HTTP, polling, WebSocket, persistent connections
-- **Discovery** - SSDP, mDNS, network scanning protocols
+This framework provides tested implementations of all these patterns, reducing a simple integration from ~1500 lines of boilerplate to ~400 lines of device-specific code. It even adds features, like back and restore, for free.
 
-## Installation
+## Core Features
+
+### Standard Setup Flow with Extension Points
+
+The setup flow handles the common pattern: configuration mode → discovery/manual entry → device selection. But every integration has unique needs, so there are extension points at key moments:
+
+- **Pre-discovery screens** - Collect API credentials or server addresses before running discovery
+- **Post-selection screens** - Gather device-specific settings after the user picks a device
+- **Custom discovery fields** - Add extra fields to the discovery screen (zones, profiles, etc.)
+
+The framework handles all the routing, state management, duplicate checking, and configuration persistence. You just implement the screens you need.
+
+**Reduction**: Setup flow code goes from ~200 lines to ~50 lines.
+
+### Device Connection Patterns
+
+Four base classes cover the common connection patterns:
+
+**StatelessHTTPDevice** - For REST APIs. You implement `verify_connection()` to test reachability. No connection management needed.
+
+**PollingDevice** - For devices that need periodic state checks. You set a poll interval and implement `poll_device()`. Automatic reconnection on errors.
+
+**WebSocketDevice** - For WebSocket connections. You implement `create_websocket()` and `handle_message()`. Framework manages the connection lifecycle, reconnection, and cleanup.
+
+**PersistentConnectionDevice** - For TCP, serial, or custom protocols. You implement `establish_connection()`, `receive_data()`, and `close_connection()`. Framework handles the receive loop and error recovery.
+
+All connection management, error handling, reconnection logic, and cleanup happens automatically.
+
+**Reduction**: Device implementation goes from ~100 lines of connection boilerplate to ~30 lines of business logic.
+
+### Configuration Management
+
+Configuration is just a dataclass. The framework handles JSON serialization, CRUD operations, and persistence:
 
 ```python
-# Add to your integration's imports
-from ucapi_base import (
-    BaseIntegrationDriver,
-    BaseSetupFlow,
-    BaseDeviceManager,
-    StatelessHTTPDevice,
-    BaseDiscovery,
-)
-```
-
-## Quick Start
-
-### 1. Define Your Device Configuration
-
-```python
-from dataclasses import dataclass
-
 @dataclass
-class MyDevice:
-    identifier: str
+class MyDeviceConfig:
+    device_id: str
     name: str
-    address: str
-    # ... additional fields
+    host: str
+
+config = BaseDeviceManager("config.json", MyDeviceConfig)
 ```
 
-### 2. Create Device Manager
+You get full CRUD operations: `add_or_update()`, `get()`, `remove()`, `all()`, `clear()`. Plus automatic backup/restore functionality for free. The framework handles all the file I/O, error handling, and atomic writes.
 
-```python
-from ucapi_base import BaseDeviceManager
+Full type safety means IDE autocomplete works everywhere. No more dict manipulation or manual JSON handling.
 
-class MyDeviceManager(BaseDeviceManager[MyDevice]):
-    def get_device_id(self, device: MyDevice) -> str:
-        return device.identifier
-    
-    def deserialize_device(self, data: dict) -> MyDevice | None:
-        return MyDevice(
-            identifier=data.get("identifier"),
-            name=data.get("name", ""),
-            address=data.get("address"),
-        )
-```
+**Reduction**: Configuration management goes from ~80 lines to ~15 lines.
 
-### 3. Create Device Interface
+### Driver Integration
 
-```python
-from ucapi_base import StatelessHTTPDevice
+The driver coordinates everything - device lifecycle, entity management, and Remote events. You implement four required methods that define your integration's specifics:
 
-class MyDeviceInterface(StatelessHTTPDevice):
-    @property
-    def identifier(self) -> str:
-        return self._device_config.identifier
-    
-    @property
-    def name(self) -> str:
-        return self._device_config.name
-    
-    @property
-    def address(self) -> str:
-        return self._device_config.address
-    
-    async def verify_connection(self) -> None:
-        # Make a simple request to verify device is reachable
-        response = await self._http_request("GET", f"http://{self.address}/status")
-        # ... verify response
-```
+- **`device_from_entity_id()`** - Extract device ID from entity ID
+- **`get_entity_ids_for_device()`** - Map device to its entities
+- **`map_device_state()`** - Convert device state to entity state
+- **`create_entities()`** - Instantiate entity objects
 
-### 4. Create Integration Driver
+Everything else is automatic. The framework handles Remote connection events (connect, disconnect, standby), entity subscriptions, device lifecycle management, and state synchronization. You can override the event handlers if needed, but the defaults work for most cases.
 
-```python
-from ucapi_base import BaseIntegrationDriver
-from media_player import MyMediaPlayer
-from remote import MyRemote
+Device events (like state changes) automatically propagate to entity state updates. The framework maintains the connection between your devices and your remote.
 
-class MyIntegrationDriver(BaseIntegrationDriver[MyDeviceInterface, MyDevice]):
-    def device_from_entity_id(self, entity_id: str) -> str | None:
-        return entity_id.split(".", 1)[1] if "." in entity_id else None
-    
-    def get_entity_ids_for_device(self, device_id: str) -> list[str]:
-        return [f"media_player.{device_id}", f"remote.{device_id}"]
-    
-    def get_device_config(self, device_id: str) -> MyDevice | None:
-        return config.devices.get(device_id)
-    
-    def get_device_id(self, device_config: MyDevice) -> str:
-        return device_config.identifier
-    
-    def get_device_name(self, device_config: MyDevice) -> str:
-        return device_config.name
-    
-    def get_device_address(self, device_config: MyDevice) -> str:
-        return device_config.address
-    
-    def map_device_state(self, device_state) -> media_player.States:
-        # Map your device state to ucapi states
-        return media_player.States.PLAYING
-    
-    def create_entities(self, device_config: MyDevice, device: MyDeviceInterface):
-        return [
-            MyMediaPlayer(device_config, device),
-            MyRemote(device_config, device),
-        ]
-```
+**Reduction**: Driver code goes from ~300 lines to ~90 lines.
 
-### 5. Create Setup Flow
+### Discovery (Optional)
 
-```python
-from ucapi_base import BaseSetupFlow
+If your devices support network discovery, the framework provides implementations for common protocols:
 
-class MySetupFlow(BaseSetupFlow[MyDevice]):
-    async def discover_devices(self) -> list:
-        # Use your discovery implementation
-        return self.discovery.discover() if self.discovery else []
-    
-    async def create_device_from_discovery(self, device_id: str, additional_data: dict):
-        # Create device config from discovered device
-        pass
-    
-    async def create_device_from_manual_entry(self, input_values: dict):
-        # Create device config from manual entry
-        pass
-    
-    def get_manual_entry_form(self) -> RequestUserInput:
-        return RequestUserInput(
-            {"en": "Manual Setup"},
-            [
-                {"id": "address", "label": {"en": "IP Address"}, "field": {"text": {"value": ""}}},
-                # ... more fields
-            ],
-        )
-    
-    def get_device_id(self, device_config: MyDevice) -> str:
-        return device_config.identifier
-    
-    def get_device_name(self, device_config: MyDevice) -> str:
-        return device_config.name
-```
+**SSDPDiscovery** - For UPnP/SSDP devices. Define your service type and implement `create_discovered_device()` to convert SSDP responses into device configs.
+
+**ZeroconfDiscovery** - For mDNS/Bonjour devices. Same pattern: service type + conversion method.
+
+**NetworkProbeDiscovery** - For devices that need active probing. Scans local network ranges and calls your `probe_host()` method for each IP.
+
+All discovery classes handle the protocol details, timeouts, and error handling. Dependencies are lazy-loaded, so you only install what you use (ssdpy, zeroconf, etc.). If your integration doesn't support discovery, just return an empty list from `discover_devices()` and focus on manual entry.
+
+### Event System
+
+The driver base class automatically wires up Remote events (connect, disconnect, standby, subscribe/unsubscribe) with sensible defaults. You can override any of them, but the defaults handle most cases.
+
+Device events (state changes, errors) automatically propagate to entity state updates. You just emit events from your device and the framework keeps the Remote in sync.
+
+## How It Works
+
+You inherit from base classes and implement a few required methods:
+
+**Driver** - Map between device states and entity states. Create entity instances.
+
+**Device** - Implement your connection pattern (verify, poll, handle messages, etc.).
+
+**Setup Flow** - Define how to discover devices and create configurations from user input.
+
+**Config** - Just a dataclass.
+
+The framework handles everything else: lifecycle management, event routing, state synchronization, configuration persistence, error handling, and reconnection logic.
 
 ## Architecture
 
-### Base Classes
+The framework is layered:
 
-#### `BaseIntegrationDriver`
-Handles all Remote Two event listeners and device lifecycle:
-- ✅ CONNECT/DISCONNECT/STANDBY events
-- ✅ SUBSCRIBE/UNSUBSCRIBE entity management
-- ✅ Device connection/disconnection handling
-- ✅ State propagation to entities
-- ✅ Event emitter setup
+```
+Your Integration (device logic, API calls, protocol handling)
+         ↓
+BaseIntegrationDriver (lifecycle, events, entity management)
+         ↓
+Device Interfaces (connection patterns, error handling)
+         ↓
+Setup Flow + Config Manager (user interaction, persistence)
+```
 
-**What you implement:**
-- Entity ID mapping
-- Device state mapping
-- Entity creation
+Each layer handles its responsibility and provides clean extension points. You only touch the top layer.
 
-#### `BaseSetupFlow`
-Complete setup flow state machine:
-- ✅ Configuration mode (add/update/remove/reset)
-- ✅ Discovery with manual fallback
-- ✅ Dropdown building and navigation
-- ✅ State management
+## Generic Type System
 
-**What you implement:**
-- Discovery logic
-- Device creation from discovery/manual
-- Manual entry form
+The framework uses bounded generics (`DeviceT`, `ConfigT`) so your IDE knows exactly what types you're working with:
 
-#### `BaseDeviceManager`
-Configuration persistence and management:
-- ✅ JSON serialization/deserialization
-- ✅ CRUD operations
-- ✅ Callback handlers
-- ✅ Backup/restore support
-- ✅ Migration framework
+```python
+class MyDriver(BaseIntegrationDriver[MyDevice, MyDeviceConfig]):
+    def get_device(self, device_id: str) -> MyDevice | None:
+        device = super().get_device(device_id)
+        # IDE knows device is MyDevice, full autocomplete available
+```
 
-**What you implement:**
-- Device ID extraction
-- Device deserialization
+No casting, no generic types, just full type safety throughout.
 
-#### `BaseDeviceInterface` (Multiple Variants)
-Different connection patterns:
+## Discovery Support
 
-**`StatelessHTTPDevice`** - For REST APIs
-- ✅ Per-request HTTP sessions
-- ✅ Connection verification
-- ✅ Error handling
+Optional discovery implementations for common protocols:
 
-**`PollingDevice`** - For devices needing status polling
-- ✅ Periodic polling loop
-- ✅ Configurable interval
-- ✅ Automatic start/stop
+- **SSDPDiscovery** - For UPnP/SSDP devices
+- **ZeroconfDiscovery** - For mDNS/Bonjour devices  
+- **NetworkProbeDiscovery** - For scanning IP ranges
 
-**`WebSocketDevice`** - For WebSocket APIs
-- ✅ Persistent WebSocket connection
-- ✅ Message loop
-- ✅ Automatic reconnection
+Lazy imports mean you only need the dependencies if you use them.
 
-**`PersistentConnectionDevice`** - For TCP/custom protocols
-- ✅ Persistent connection maintenance
-- ✅ Exponential backoff reconnection
-- ✅ Connection loop
+## Real-World Example
 
-**What you implement:**
-- Connection establishment
-- Device-specific communication
+See the PSN integration in this repository:
 
-#### `BaseDiscovery` (Multiple Variants)
-Discovery protocol implementations:
+- `intg-psn/driver.py` - 90 lines (was 300)
+- `intg-psn/psn.py` - 140 lines (was 240)
+- `intg-psn/setup_flow.py` - 50 lines (was 250)
+- `intg-psn/config.py` - 15 lines (was 95)
 
-**`SSDPDiscovery`** - For UPnP/SSDP devices
-- ✅ SSDP search
-- ✅ Device filtering
-- ✅ Response parsing
+Total: ~295 lines of integration code vs ~885 lines previously. And the new code is type-safe, testable, and maintainable.
 
-**`MDNSDiscovery`** - For Bonjour/mDNS devices
-- ✅ Service browsing
-- ✅ Service info extraction
+## Migration
 
-**`NetworkScanDiscovery`** - For network scanning
-- ✅ IP range scanning
-- ✅ Port probing
+If you have an existing integration, see [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for step-by-step instructions with before/after examples.
 
-**What you implement:**
-- Device info extraction from discovery data
+## Requirements
 
-## Benefits
+- Python 3.11+
+- ucapi
+- pyee
 
-### For Integration Developers
-
-✅ **Save 300-500 lines per integration**  
-✅ **Consistent patterns across all integrations**  
-✅ **Battle-tested error handling**  
-✅ **Reduced bugs from boilerplate**  
-✅ **Focus on device-specific logic**  
-
-### For Maintenance
-
-✅ **Fix bugs in one place**  
-✅ **Add features to all integrations**  
-✅ **Easier code review**  
-✅ **Better documentation**  
-✅ **Type safety with generics**  
-
-## Examples
-
-See the Yamaha AVR integration for a complete example of using all base classes.
-
-## Best Practices
-
-1. **Use type hints** - The base classes are generic for type safety
-2. **Override selectively** - Only override methods you need to customize
-3. **Keep it simple** - Don't fight the framework, adapt your integration to its patterns
-4. **Log appropriately** - Base classes provide structured logging
-5. **Test thoroughly** - Test your implementation of abstract methods
-
-## Migration Guide
-
-### From Manual Implementation
-
-1. Identify your device configuration structure
-2. Choose appropriate device interface base (HTTP/Polling/WebSocket/Persistent)
-3. Implement required abstract methods
-4. Remove boilerplate event handlers from driver.py
-5. Replace setup flow with BaseSetupFlow
-6. Replace config management with BaseDeviceManager
-
-### Backward Compatibility
-
-The base classes are designed to be non-breaking:
-- Can be adopted gradually
-- Existing integrations continue to work
-- Optional features can be added later
-
-## Contributing
-
-When adding new patterns to base classes:
-1. Ensure pattern appears in 2+ integrations
-2. Keep abstractions simple and focused
-3. Document with examples
-4. Add type hints
-5. Include tests
+Optional (only if you use them):
+- aiohttp (for HTTP devices)
+- websockets (for WebSocket devices)
+- ssdpy (for SSDP discovery)
+- zeroconf (for mDNS discovery)
 
 ## License
 
 Mozilla Public License Version 2.0
-
-## Version
-
-0.1.0 - Initial release
