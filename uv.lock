@@ -218,14 +218,14 @@ wheels = [
 
 [[package]]
 name = "pyee"
-version = "12.0.0"
+version = "13.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/a7/8faaa62a488a2a1e0d56969757f087cbd2729e9bcfa508c230299f366b4c/pyee-12.0.0.tar.gz", hash = "sha256:c480603f4aa2927d4766eb41fa82793fe60a82cbfdb8d688e0d08c55a534e145", size = 29675, upload-time = "2024-08-30T19:40:43.555Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/03/1fd98d5841cd7964a27d729ccf2199602fe05eb7a405c1462eb7277945ed/pyee-13.0.0.tar.gz", hash = "sha256:b391e3c5a434d1f5118a25615001dbc8f669cf410ab67d04c4d4e07c55481c37", size = 31250, upload-time = "2025-03-17T18:53:15.955Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/0d/95993c08c721ec68892547f2117e8f9dfbcef2ca71e098533541b4a54d5f/pyee-12.0.0-py3-none-any.whl", hash = "sha256:7b14b74320600049ccc7d0e0b1becd3b4bd0a03c745758225e31a59f4095c990", size = 14831, upload-time = "2024-08-30T19:40:42.132Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/4d/b9add7c84060d4c1906abe9a7e5359f2a60f7a9a4f67268b2766673427d8/pyee-13.0.0-py3-none-any.whl", hash = "sha256:48195a3cddb3b1515ce0695ed76036b5ccc2ef3a9f963ff9f77aec0139845498", size = 15730, upload-time = "2025-03-17T18:53:14.532Z" },
 ]
 
 [[package]]
@@ -271,29 +271,45 @@ dependencies = [
     { name = "pyee" },
     { name = "pyrate-limiter" },
     { name = "ucapi" },
+    { name = "ucapi-framework" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.2" },
     { name = "psnawp", specifier = "==3.0.1" },
-    { name = "pyee", specifier = "~=12.0.0" },
+    { name = "pyee", specifier = ">=9.0.0" },
     { name = "pyrate-limiter", specifier = "==3.9.0" },
-    { name = "ucapi", specifier = "==0.3.1" },
+    { name = "ucapi", specifier = "==0.3.2" },
+    { name = "ucapi-framework", specifier = "==0.1.1" },
 ]
 
 [[package]]
 name = "ucapi"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyee" },
     { name = "websockets" },
     { name = "zeroconf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/89/b9/f9fdda9dbc5d26729be1b7b56ae88df6d7fed94cc931777c6913752563a8/ucapi-0.3.1.tar.gz", hash = "sha256:b87125b383b8eeab435387168a5f6b1b7bc182f14b68d233e1ae7d33a4e397b2", size = 36389, upload-time = "2025-05-14T17:21:06.735Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/83/8dff2cab7888b88aa4b789d48df5561cca308142c8b33e8bcc6c77fb002b/ucapi-0.3.2.tar.gz", hash = "sha256:9185dc68cb18cf45c5bf0eec1010f1a79c0b6df15a839ac7ede6f3881314bad5", size = 36547, upload-time = "2025-09-17T13:18:22.87Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/5f/0420683c9785982c1c533036f046e52a0343fc2054d5697b667b330b4ba6/ucapi-0.3.1-py3-none-any.whl", hash = "sha256:ef352226d0d9b82ac91788f12ceaa7f9200b3698e2a1c4f50c88967730219f91", size = 32244, upload-time = "2025-05-14T17:21:04.927Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/1d/9a875bb213381a712c31ad5499abf49796cf7d2175a851fa250e8afef98b/ucapi-0.3.2-py3-none-any.whl", hash = "sha256:7f09333ebbbc0422a7a578bd35f44884299a0e2267eabec62ea16ffa9216f975", size = 32336, upload-time = "2025-09-17T13:18:22.017Z" },
+]
+
+[[package]]
+name = "ucapi-framework"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "pyee" },
+    { name = "ucapi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/c3/ecadb0aed673ad60e3ca501aed401488c0a32ae7ca2c211aeaff295171e7/ucapi_framework-0.1.1.tar.gz", hash = "sha256:151008dfc6395d81728e7be3550d031319dd1da643e42efceba1aaf07b8c3804", size = 42142, upload-time = "2025-11-20T00:26:26.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/99/ad/0a13c68300bd337401af1aa14a87769e12436e6c4425993cc2cbcf61d651/ucapi_framework-0.1.1-py3-none-any.whl", hash = "sha256:9859e89dbc5733a333f447be1ab75568a35d8ee54dfdc4c8aee372f9e21a4d98", size = 25767, upload-time = "2025-11-20T00:26:25.116Z" },
 ]
 
 [[package]]

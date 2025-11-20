@@ -6,21 +6,12 @@ Setup flow for PlayStation Network integration.
 """
 
 import logging
-import os
-import sys
 from typing import Any
-
-# Add parent directory to path for ucapi_base module (before it's published)
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-if _PARENT_DIR not in sys.path:
-    sys.path.insert(0, _PARENT_DIR)
-
-from config import PSNDevice  # noqa: E402
-from psn import PlaystationNetwork  # noqa: E402
-from psnawp_api.utils.misc import parse_npsso_token  # noqa: E402
-from ucapi import RequestUserInput  # noqa: E402
-from ucapi_base import BaseSetupFlow  # noqa: E402
+from config import PSNDevice
+from psn import PlaystationNetwork
+from psnawp_api.utils.misc import parse_npsso_token
+from ucapi import RequestUserInput
+from ucapi_framework import BaseSetupFlow
 
 _LOG = logging.getLogger(__name__)
 
@@ -32,15 +23,6 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
     Handles PSN account configuration through NPSSO token authentication.
     PSN does not support device discovery, so manual entry is always required.
     """
-
-    def __init__(self, config_manager):
-        """
-        Initialize PSN setup flow.
-
-        :param config_manager: PSNDeviceManager instance
-        """
-        # PSN has no discovery, pass None for discovery_class
-        super().__init__(config_manager, discovery_class=None)
 
     async def create_device_from_manual_entry(
         self, input_values: dict[str, Any]

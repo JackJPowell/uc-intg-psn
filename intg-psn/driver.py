@@ -8,23 +8,13 @@ PSN Integration Driver using ucapi_base framework.
 import asyncio
 import logging
 import os
-import sys
 from typing import Any
-
-# Add parent directory to path for ucapi_base module (before it's published)
-# This allows importing ucapi_base when running from intg-psn directory
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-if _PARENT_DIR not in sys.path:
-    sys.path.insert(0, _PARENT_DIR)
-
-import config  # noqa: E402
-from config import PSNDevice  # noqa: E402
-from media_player import PSNMediaPlayer  # noqa: E402
-from psn import PSNAccount  # noqa: E402
-from setup_flow import PSNSetupFlow  # noqa: E402
-from ucapi import media_player  # noqa: E402
-from ucapi_base import BaseIntegrationDriver  # noqa: E402
+from config import PSNDevice, PSNDeviceManager
+from media_player import PSNMediaPlayer
+from psn import PSNAccount
+from setup_flow import PSNSetupFlow
+from ucapi import media_player
+from ucapi_framework import BaseIntegrationDriver
 
 _LOG = logging.getLogger("driver")
 _LOOP = asyncio.get_event_loop()
@@ -36,16 +26,6 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
 
     Handles PlayStation Network account management and entity lifecycle.
     """
-
-    def __init__(self, loop: asyncio.AbstractEventLoop):
-        """
-        Initialize PSN integration driver.
-
-        :param loop: The asyncio event loop
-        """
-        super().__init__(
-            loop=loop, device_class=PSNAccount, entity_classes=[PSNMediaPlayer]
-        )
 
     # ========================================================================
     # Required Abstract Method Implementations
@@ -164,10 +144,12 @@ async def main():
     logging.getLogger("config").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
 
-    driver = PSNIntegrationDriver(_LOOP)
+    driver = PSNIntegrationDriver(
+        loop=_LOOP, device_class=PSNAccount, entity_classes=[PSNMediaPlayer]
+    )
 
     # Initialize configuration manager with device callbacks
-    driver.config = config.PSNDeviceManager(
+    driver.config = PSNDeviceManager(
         driver.api.config_dir_path, driver.on_device_added, driver.on_device_removed
     )
 

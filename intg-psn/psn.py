@@ -7,26 +7,12 @@ Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from 
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
-import asyncio
 import logging
-import os
-import sys
 from asyncio import AbstractEventLoop
-from dataclasses import dataclass
-from typing import Any
-
-# Add parent directory to path for ucapi_base module (before it's published)
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-if _PARENT_DIR not in sys.path:
-    sys.path.insert(0, _PARENT_DIR)
-
-from config import PSNDevice  # noqa: E402
-from psnawp_api import PSNAWP  # noqa: E402
-from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError  # noqa: E402
-from psnawp_api.models.user import User  # noqa: E402
-from pyrate_limiter import Duration, Rate  # noqa: E402
-from ucapi_base.device import PollingDevice, DeviceEvents  # noqa: E402
+from config import PSNDevice
+from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
+from ucapi_framework.device import PollingDevice, DeviceEvents
+from api import PlaystationNetwork, PlaystationNetworkData
 
 _LOG = logging.getLogger(__name__)
 
@@ -35,96 +21,6 @@ ARTWORK_HEIGHT = 400
 
 # Map ucapi_base DeviceEvents to EVENTS for backwards compatibility
 EVENTS = DeviceEvents
-
-
-@dataclass
-class PlaystationNetworkData:
-    """Dataclass representing data retrieved from the Playstation Network api."""
-
-    presence: dict[str, Any]
-    username: str
-    account_id: str
-    available: bool
-    title_metadata: dict[str, Any]
-    platform: dict[str, Any]
-    registered_platforms: list[str]
-
-
-class PlaystationNetwork:
-    """Helper Class to return playstation network data in an easy to use structure
-
-    :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
-
-    def __init__(self, npsso: str):
-        self.rate = Rate(300, Duration.MINUTE * 15)
-        self.psn = PSNAWP(npsso, rate_limit=self.rate)
-        self.client = self.psn.me()
-        self.user: User | None = None
-        self.data: PlaystationNetworkData | None = None
-
-    def validate_connection(self):
-        self.psn.me()
-
-    def get_user(self):
-        self.user = self.psn.user(online_id="me")
-        return self.user
-
-    def close(self):
-        """Close the PSN connection and cleanup resources."""
-        try:
-            if hasattr(self.psn, "authenticator") and hasattr(
-                self.psn.authenticator, "session"
-            ):
-                # Close the aiohttp session if it exists
-                session = self.psn.authenticator.session
-                if session and not session.closed:
-                    # Schedule the session close in the event loop
-                    try:
-                        if self._loop.is_running():
-                            asyncio.create_task(session.close())
-                        else:
-                            self._loop.run_until_complete(session.close())
-                    except Exception as ex:  # pylint: disable=broad-exception-caught
-                        _LOG.debug("Error closing session: %s", ex)
-        except Exception as ex:  # pylint: disable=broad-exception-caught
-            _LOG.debug("Error during PSN cleanup: %s", ex)
-
-    def get_data(self):
-        data: PlaystationNetworkData = PlaystationNetworkData(
-            {}, "", "", False, {}, {}, []
-        )
-
-        if not self.user:
-            self.user = self.get_user()
-
-        devices = self.client.get_account_devices()
-        for device in devices:
-            if (
-                device.get("deviceType") in ["PS5", "PS4"]
-                and device.get("deviceType") not in data.registered_platforms
-            ):
-                data.registered_platforms.append(device.get("deviceType", ""))
-
-        data.username = self.user.online_id
-        data.account_id = self.user.account_id
-        data.presence = self.user.get_presence()
-
-        data.available = (
-            data.presence.get("basicPresence", {}).get("availability")
-            == "availableToPlay"
-        )
-        data.platform = data.presence.get("basicPresence", {}).get(
-            "primaryPlatformInfo"
-        )
-        game_title_info_list = data.presence.get("basicPresence", {}).get(
-            "gameTitleInfoList"
-        )
-
-        if game_title_info_list:
-            data.title_metadata = game_title_info_list[0]
-
-        self.data = data
-        return self.data
 
 
 class PSNAccount(PollingDevice):

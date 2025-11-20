@@ -16,23 +16,6 @@ If it isn't already tracked, [create a new issue](https://github.com/jackjpowell
 If you'd like to see or add new functionality to the library, describe the problem you want to solve in a
 [new Issue](https://github.com/jackjpowell/uc-intg-psn/issues/new).
 
-### Pull Requests
-
-**Any pull request needs to be reviewed and approved by the Unfolded Circle development team.**
-
-We love contributions from everyone.
-
-⚠️ If you plan to make substantial changes, we kindly ask you, that you please reach out to us first.  
-Either by opening a feature request describing your proposed changes before submitting code, or by contacting us on
-one of the other [feedback channels](#feedback-speech_balloon).
-
-Since this software is being used on the embedded Remote Two/3 devices, we have to make sure it remains
-compatible with the embedded runtime environment and runs smoothly.
-
-Submitting pull requests for typos, formatting issues etc. are happily accepted and usually approved relatively quick.  
-
-With that out of the way, here's the process of creating a pull request and making sure it passes the automated tests:
-
 ### Contributing Code :bulb:
 
 1. Fork the repo.

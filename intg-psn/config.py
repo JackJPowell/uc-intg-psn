@@ -6,17 +6,9 @@ Configuration handling of the integration driver.
 """
 
 import logging
-import os
-import sys
 from dataclasses import dataclass
+from ucapi_framework import BaseDeviceManager
 
-# Add parent directory to path for ucapi_base module (before it's published)
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-_PARENT_DIR = os.path.dirname(_SCRIPT_DIR)
-if _PARENT_DIR not in sys.path:
-    sys.path.insert(0, _PARENT_DIR)
-
-from ucapi_base import BaseDeviceManager  # noqa: E402
 
 _LOG = logging.getLogger(__name__)
 
