@@ -1,8 +1,6 @@
 """
 This module implements the PlayStation Network communication of the Remote integration driver.
 
-Uses the [psnawp-ha](https://github.com/--) library with concepts borrowed from the Home Assistant
-
 :copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
