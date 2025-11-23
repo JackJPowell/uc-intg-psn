@@ -10,5 +10,5 @@ dependencies = [
     "PSNAWP==3.0.1",
     "pyrate_limiter==3.9.0",
     "aiohttp>=3.13.2",
-    "ucapi-framework==0.1.1",
+    "ucapi-framework==0.1.3",
 ]

@@ -42,46 +42,6 @@ class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
         """
         return entity_id
 
-    def get_entity_ids_for_device(self, device_id: str) -> list[str]:
-        """
-        Get all entity identifiers for a device.
-
-        PSN has one media_player entity per account.
-
-        :param device_id: Device identifier (account_id)
-        :return: List containing entity IDs
-        """
-        return [device_id]
-
-    def map_device_state(self, device_state: Any) -> media_player.States:
-        """
-        Map PSN device state to ucapi media player state.
-
-        :param device_state: PSN state string
-        :return: Media player state
-        """
-        match device_state:
-            case "ON" | "MENU":
-                return media_player.States.ON
-            case "OFF":
-                return media_player.States.OFF
-            case "PLAYING":
-                return media_player.States.PLAYING
-            case _:
-                return media_player.States.UNKNOWN
-
-    def create_entities(
-        self, device_config: PSNDevice, device: PSNAccount
-    ) -> list[PSNMediaPlayer]:
-        """
-        Create entity instances for a PSN device.
-
-        :param device_config: PSN device configuration
-        :param device: PSN device instance
-        :return: List containing PSNMediaPlayer entity
-        """
-        return [PSNMediaPlayer(device_config, device)]
-
     # ========================================================================
     # Device Event Handler Overrides
     # ========================================================================
