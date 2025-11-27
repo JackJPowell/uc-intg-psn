@@ -7,18 +7,16 @@ This module implements the PlayStation Network communication of the Remote integ
 
 import logging
 from asyncio import AbstractEventLoop
-from config import PSNDevice
+from driver import PSNDevice
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from ucapi_framework.device import PollingDevice, DeviceEvents
 from api import PlaystationNetwork, PlaystationNetworkData
+from ucapi.media_player import Attributes as MediaAttr
 
 _LOG = logging.getLogger(__name__)
 
 ARTWORK_WIDTH = 400
 ARTWORK_HEIGHT = 400
-
-# Map ucapi_base DeviceEvents to EVENTS for backwards compatibility
-EVENTS = DeviceEvents
 
 
 class PSNAccount(PollingDevice):
@@ -28,6 +26,7 @@ class PSNAccount(PollingDevice):
         self,
         device: PSNDevice,
         loop: AbstractEventLoop | None = None,
+        config_manager=None,
     ) -> None:
         """Create instance with 45 second poll interval."""
         super().__init__(device, loop, poll_interval=45)
@@ -115,44 +114,50 @@ class PSNAccount(PollingDevice):
                 )
                 return
 
-            update = {"state": "OFF"}
+            update = {MediaAttr.STATE: "OFF"}
 
             if (
                 self._psn_data.platform
                 and self._psn_data.platform.get("platform", "")
                 and self._psn_data.platform.get("onlineStatus", "") == "online"
             ):
-                update["state"] = "ON"
+                update[MediaAttr.STATE] = "ON"
                 if (
                     self._psn_data.available
                     and self._psn_data.title_metadata
                     and self._psn_data.title_metadata.get("npTitleId") is not None
                 ):
-                    update["state"] = "PLAYING"
+                    update[MediaAttr.STATE] = "PLAYING"
 
-            self._state = update["state"]
+            self._state = update[MediaAttr.STATE]
 
             # Add title metadata if available
             if self._psn_data.title_metadata and self._psn_data.title_metadata.get(
                 "npTitleId"
             ):
-                update["title"] = self._psn_data.title_metadata.get("titleName")
-                update["artist"] = self._psn_data.title_metadata.get("format")
+                update[MediaAttr.MEDIA_TITLE] = self._psn_data.title_metadata.get(
+                    "titleName"
+                )
+                update[MediaAttr.MEDIA_ARTIST] = self._psn_data.title_metadata.get(
+                    "format"
+                )
 
                 title = self._psn_data.title_metadata
                 if title.get("format", "") == "PS5":
-                    update["artwork"] = title.get("conceptIconUrl")
+                    update[MediaAttr.MEDIA_IMAGE_URL] = title.get("conceptIconUrl")
                 elif title.get("format", "") == "PS4":
-                    update["artwork"] = title.get("npTitleIconUrl")
+                    update[MediaAttr.MEDIA_IMAGE_URL] = title.get("npTitleIconUrl")
 
             # Emit update event
-            self.events.emit(EVENTS.UPDATE, self.identifier, update)
-            _LOG.debug("[%s] PSN update emitted: %s", self.log_id, update.get("state"))
+            self.events.emit(DeviceEvents.UPDATE, self.identifier, update)
+            _LOG.debug(
+                "[%s] PSN update emitted: %s", self.log_id, update.get(MediaAttr.STATE)
+            )
 
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error while polling PSN: %s", self.log_id, ex)
             self.events.emit(
-                EVENTS.ERROR,
+                DeviceEvents.ERROR,
                 self.identifier,
                 f"Error while polling PSN: {ex}",
             )

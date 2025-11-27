@@ -8,7 +8,7 @@ PlayStation Network Media Player entity for Unfolded Circle Remote Two.
 import logging
 from typing import Any
 
-from config import PSNDevice
+from driver import PSNDevice
 from psn import PSNAccount
 from ucapi import MediaPlayer as UCMediaPlayer
 from ucapi import StatusCodes, media_player

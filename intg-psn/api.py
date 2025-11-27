@@ -43,9 +43,11 @@ class PlaystationNetwork:
         self.data: PlaystationNetworkData | None = None
 
     def validate_connection(self):
+        """Validate the PSN connection by fetching the current user."""
         self.psn.me()
 
     def get_user(self):
+        """Get the PSN user object."""
         self.user = self.psn.user(online_id="me")
         return self.user
 
@@ -70,6 +72,8 @@ class PlaystationNetwork:
             _LOG.debug("Error during PSN cleanup: %s", ex)
 
     def get_data(self):
+        """Get the Playstation Network data."""
+
         data: PlaystationNetworkData = PlaystationNetworkData(
             {}, "", "", False, {}, {}, []
         )

@@ -7,7 +7,7 @@ Setup flow for PlayStation Network integration.
 
 import logging
 from typing import Any
-from config import PSNDevice
+from driver import PSNDevice
 from psn import PlaystationNetwork
 from psnawp_api.utils.misc import parse_npsso_token
 from ucapi import RequestUserInput
@@ -23,36 +23,6 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
     Handles PSN account configuration through NPSSO token authentication.
     PSN does not support device discovery, so manual entry is always required.
     """
-
-    async def create_device_from_manual_entry(
-        self, input_values: dict[str, Any]
-    ) -> PSNDevice:
-        """
-        Create PSN device configuration from manual NPSSO token entry.
-
-        :param input_values: User input containing 'npsso' token
-        :return: PSN device configuration
-        :raises ValueError: If authentication fails
-        """
-        npsso = parse_npsso_token(input_values.get("npsso", ""))
-
-        if not npsso:
-            _LOG.error("Invalid or missing NPSSO token")
-            raise ValueError("Invalid or missing NPSSO token")
-
-        try:
-            _LOG.debug("Connecting to PSN API")
-            psnawp = PlaystationNetwork(npsso)
-            user = psnawp.get_user()
-            _LOG.info("Authenticated PSN Account: %s", user.online_id)
-
-            return PSNDevice(
-                identifier=user.account_id, name=user.online_id, npsso=npsso
-            )
-
-        except Exception as err:
-            _LOG.error("Failed to authenticate with PSN: %s", err)
-            raise ValueError(f"Failed to authenticate with PSN: {err}") from err
 
     def get_manual_entry_form(self) -> RequestUserInput:
         """
@@ -89,3 +59,33 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
                 },
             ],
         )
+
+    async def query_device(
+        self, input_values: dict[str, Any]
+    ) -> RequestUserInput | PSNDevice:
+        """
+        Create PSN device configuration from manual NPSSO token entry.
+
+        :param input_values: User input containing 'npsso' token
+        :return: PSN device configuration
+        :raises ValueError: If authentication fails
+        """
+        npsso = parse_npsso_token(input_values.get("npsso", ""))
+
+        if not npsso:
+            _LOG.error("Invalid or missing NPSSO token")
+            raise ValueError("Invalid or missing NPSSO token")
+
+        try:
+            _LOG.debug("Connecting to PSN API")
+            psnawp = PlaystationNetwork(npsso)
+            user = psnawp.get_user()
+            _LOG.info("Authenticated PSN Account: %s", user.online_id)
+
+            return PSNDevice(
+                identifier=user.account_id, name=user.online_id, npsso=npsso
+            )
+
+        except Exception as err:
+            _LOG.error("Failed to authenticate with PSN: %s", err)
+            raise ValueError(f"Failed to authenticate with PSN: {err}") from err
