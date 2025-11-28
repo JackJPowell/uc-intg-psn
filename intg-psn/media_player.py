@@ -7,9 +7,11 @@ PlayStation Network Media Player entity for Unfolded Circle Remote Two.
 
 import logging
 from typing import Any
+
 from const import PSNDevice
 from psn import PSNAccount
-from ucapi import MediaPlayer as UCMediaPlayer, StatusCodes, media_player
+from ucapi import MediaPlayer as UCMediaPlayer
+from ucapi import StatusCodes, media_player
 
 _LOG = logging.getLogger(__name__)
 

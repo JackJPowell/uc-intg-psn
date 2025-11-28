@@ -8,11 +8,12 @@ PSN Integration Driver.
 import asyncio
 import logging
 import os
+
+from const import PSNDevice
 from media_player import PSNMediaPlayer
 from psn import PSNAccount
 from setup_flow import PSNSetupFlow
-from ucapi_framework import BaseIntegrationDriver, BaseDeviceManager, get_config_path
-from const import PSNDevice
+from ucapi_framework import BaseDeviceManager, BaseIntegrationDriver, get_config_path
 
 _LOG = logging.getLogger("driver")
 

@@ -6,9 +6,9 @@ API Wrapper for PlayStation Network using PSNAWP.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
-import logging
 
 from psnawp_api import PSNAWP  # noqa: E402
 from psnawp_api.models.user import User  # noqa: E402

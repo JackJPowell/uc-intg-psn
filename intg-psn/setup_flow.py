@@ -7,8 +7,9 @@ Setup flow for PlayStation Network integration.
 
 import logging
 from typing import Any
-from const import PSNDevice
+
 from api import PlayStationNetwork
+from const import PSNDevice
 from psnawp_api.utils.misc import parse_npsso_token
 from ucapi import RequestUserInput
 from ucapi_framework import BaseSetupFlow
