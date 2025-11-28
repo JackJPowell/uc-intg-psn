@@ -1,5 +1,5 @@
 """
-PSN Integration Driver
+PSN Integration Driver.
 
 :copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.

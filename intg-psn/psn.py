@@ -45,7 +45,7 @@ class PSNAccount(PollingDevice):
 
     @property
     def address(self) -> str | None:
-        """Return the device address (PSN doesn't have a physical address)."""
+        """Return the device address."""
         return self._device_config.identifier
 
     @property

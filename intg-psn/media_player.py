@@ -14,7 +14,7 @@ from ucapi import MediaPlayer as UCMediaPlayer, StatusCodes, media_player
 _LOG = logging.getLogger(__name__)
 
 
-class PSNMediaPlayer(UCMediaPlayer):
+class PSNMediaPlayer(UCMediaPlayer):  # pylint: disable=too-few-public-methods
     """Media player entity for PlayStation Network."""
 
     def __init__(self, device_config: PSNDevice, device: PSNAccount):

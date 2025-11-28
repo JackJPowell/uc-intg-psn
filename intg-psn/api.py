@@ -1,5 +1,5 @@
 """
-API Wrapper for PlayStation Network using PSNAWP
+API Wrapper for PlayStation Network using PSNAWP.
 
 :copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -31,11 +31,13 @@ class PlayStationNetworkData:
 
 
 class PlayStationNetwork:
-    """Helper Class to return PlayStation Network data in an easy to use structure
+    """Helper Class to return PlayStation Network data in an easy to use structure.
 
-    :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
+    :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect.
+    """
 
     def __init__(self, npsso: str):
+        """Initialize PlayStationNetwork with NPSSO token."""
         self.rate = Rate(300, Duration.MINUTE * 15)
         self.psn = PSNAWP(npsso, rate_limit=self.rate)
         self.client = self.psn.me()
@@ -74,7 +76,6 @@ class PlayStationNetwork:
 
     def get_data(self):
         """Get the PlayStation Network data."""
-
         data: PlayStationNetworkData = PlayStationNetworkData(
             {}, "", "", False, {}, {}, []
         )
