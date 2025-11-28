@@ -7,7 +7,7 @@ This module implements the PlayStation Network communication of the Remote integ
 
 import logging
 from asyncio import AbstractEventLoop
-from driver import PSNDevice
+from const import PSNDevice
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from ucapi_framework.device import PollingDevice, DeviceEvents
 from api import PlaystationNetwork, PlaystationNetworkData
