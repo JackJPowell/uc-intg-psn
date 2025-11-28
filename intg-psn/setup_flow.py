@@ -8,7 +8,7 @@ Setup flow for PlayStation Network integration.
 import logging
 from typing import Any
 from const import PSNDevice
-from psn import PlaystationNetwork
+from api import PlayStationNetwork
 from psnawp_api.utils.misc import parse_npsso_token
 from ucapi import RequestUserInput
 from ucapi_framework import BaseSetupFlow
@@ -42,9 +42,13 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
                         "label": {
                             "value": {
                                 "en": (
-                                    "Your NPSSO Token is required to authenticate to the PlayStation Network. "
-                                    "\n\nPlease sign in to the [PlayStation Network](https://playstation.com) first. "
-                                    "Then [click here](https://ca.account.sony.com/api/v1/ssocookie) to retrieve your token."
+                                    "Your NPSSO Token is required to authenticate "
+                                    "to the PlayStation Network. "
+                                    "\n\nPlease sign in to the "
+                                    "[PlayStation Network](https://playstation.com) first. "
+                                    "Then [click here]"
+                                    "(https://ca.account.sony.com/api/v1/ssocookie) "
+                                    "to retrieve your token."
                                 ),
                             }
                         }
@@ -78,7 +82,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
 
         try:
             _LOG.debug("Connecting to PSN API")
-            psnawp = PlaystationNetwork(npsso)
+            psnawp = PlayStationNetwork(npsso)
             user = psnawp.get_user()
             _LOG.info("Authenticated PSN Account: %s", user.online_id)
 

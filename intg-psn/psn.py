@@ -10,7 +10,7 @@ from asyncio import AbstractEventLoop
 from const import PSNDevice
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from ucapi_framework.device import PollingDevice, DeviceEvents
-from api import PlaystationNetwork, PlaystationNetworkData
+from api import PlayStationNetwork, PlayStationNetworkData
 from ucapi.media_player import Attributes as MediaAttr
 
 _LOG = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class PSNAccount(PollingDevice):
     ) -> None:
         """Create instance with 45 second poll interval."""
         super().__init__(device, loop, poll_interval=45)
-        self._psn: PlaystationNetwork | None = None
-        self._psn_data: PlaystationNetworkData | None = None
+        self._psn: PlayStationNetwork | None = None
+        self._psn_data: PlayStationNetworkData | None = None
 
     @property
     def identifier(self) -> str:
@@ -63,7 +63,7 @@ class PSNAccount(PollingDevice):
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
         try:
-            self._psn = PlaystationNetwork(self._device_config.npsso)
+            self._psn = PlayStationNetwork(self._device_config.npsso)
             _LOG.debug("[%s] PSN connection established", self.log_id)
             # Do initial attribute update
             await self.poll_device()

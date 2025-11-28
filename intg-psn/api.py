@@ -1,5 +1,5 @@
 """
-API Wrapper for Playstation Network using PSNAWP
+API Wrapper for PlayStation Network using PSNAWP
 
 :copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -18,8 +18,8 @@ _LOG = logging.getLogger(__name__)
 
 
 @dataclass
-class PlaystationNetworkData:
-    """Dataclass representing data retrieved from the Playstation Network api."""
+class PlayStationNetworkData:
+    """Dataclass representing data retrieved from the PlayStation Network api."""
 
     presence: dict[str, Any]
     username: str
@@ -30,8 +30,8 @@ class PlaystationNetworkData:
     registered_platforms: list[str]
 
 
-class PlaystationNetwork:
-    """Helper Class to return playstation network data in an easy to use structure
+class PlayStationNetwork:
+    """Helper Class to return PlayStation Network data in an easy to use structure
 
     :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect."""
 
@@ -40,7 +40,7 @@ class PlaystationNetwork:
         self.psn = PSNAWP(npsso, rate_limit=self.rate)
         self.client = self.psn.me()
         self.user: User | None = None
-        self.data: PlaystationNetworkData | None = None
+        self.data: PlayStationNetworkData | None = None
 
     def validate_connection(self):
         """Validate the PSN connection by fetching the current user."""
@@ -62,19 +62,20 @@ class PlaystationNetwork:
                 if session and not session.closed:
                     # Schedule the session close in the event loop
                     try:
-                        if self._loop.is_running():
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
                             asyncio.create_task(session.close())
                         else:
-                            self._loop.run_until_complete(session.close())
+                            loop.run_until_complete(session.close())
                     except Exception as ex:  # pylint: disable=broad-exception-caught
                         _LOG.debug("Error closing session: %s", ex)
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.debug("Error during PSN cleanup: %s", ex)
 
     def get_data(self):
-        """Get the Playstation Network data."""
+        """Get the PlayStation Network data."""
 
-        data: PlaystationNetworkData = PlaystationNetworkData(
+        data: PlayStationNetworkData = PlayStationNetworkData(
             {}, "", "", False, {}, {}, []
         )
 

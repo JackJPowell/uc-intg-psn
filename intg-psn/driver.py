@@ -1,5 +1,5 @@
 """
-PSN Integration Driver using ucapi_base framework.
+PSN Integration Driver
 
 :copyright: (c) 2025 by Jack Powell.
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
@@ -19,7 +19,7 @@ _LOG = logging.getLogger("driver")
 
 class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNDevice]):
     """
-    PSN Integration driver using ucapi_base framework.
+    PSN Integration driver.
 
     Handles PlayStation Network account management and entity lifecycle.
     """
