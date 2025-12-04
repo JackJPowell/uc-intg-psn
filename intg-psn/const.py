@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class PSNDevice:
+class PSNConfig:
     """PSN Account device configuration."""
 
     identifier: str
