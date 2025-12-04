@@ -9,7 +9,7 @@ import logging
 from typing import Any
 
 from api import PlayStationNetwork
-from const import PSNDevice
+from const import PSNConfig
 from psnawp_api.utils.misc import parse_npsso_token
 from ucapi import RequestUserInput
 from ucapi_framework import BaseSetupFlow
@@ -17,7 +17,7 @@ from ucapi_framework import BaseSetupFlow
 _LOG = logging.getLogger(__name__)
 
 
-class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
+class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
     """
     Setup flow for PlayStation Network integration.
 
@@ -67,7 +67,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
 
     async def query_device(
         self, input_values: dict[str, Any]
-    ) -> RequestUserInput | PSNDevice:
+    ) -> RequestUserInput | PSNConfig:
         """
         Create PSN device configuration from manual NPSSO token entry.
 
@@ -87,7 +87,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNDevice]):
             user = psnawp.get_user()
             _LOG.info("Authenticated PSN Account: %s", user.online_id)
 
-            return PSNDevice(
+            return PSNConfig(
                 identifier=user.account_id, name=user.online_id, npsso=npsso
             )
 

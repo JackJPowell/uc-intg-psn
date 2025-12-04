@@ -9,7 +9,7 @@ import logging
 from asyncio import AbstractEventLoop
 
 from api import PlayStationNetwork, PlayStationNetworkData
-from const import PSNDevice
+from const import PSNConfig
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from ucapi.media_player import Attributes as MediaAttr
 from ucapi_framework.device import DeviceEvents, PollingDevice
@@ -25,12 +25,14 @@ class PSNAccount(PollingDevice):
 
     def __init__(
         self,
-        device: PSNDevice,
+        device_config: PSNConfig,
         loop: AbstractEventLoop | None = None,
         config_manager=None,
     ) -> None:
         """Create instance with 45 second poll interval."""
-        super().__init__(device, loop, poll_interval=45)
+        super().__init__(
+            device_config, loop, poll_interval=45, config_manager=config_manager
+        )
         self._psn: PlayStationNetwork | None = None
         self._psn_data: PlayStationNetworkData | None = None
 
