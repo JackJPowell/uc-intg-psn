@@ -13,6 +13,7 @@ from typing import Any
 from psnawp_api import PSNAWP  # noqa: E402
 from psnawp_api.models.user import User  # noqa: E402
 from pyrate_limiter import Duration, Rate  # noqa: E402
+from requests import Session
 
 _LOG = logging.getLogger(__name__)
 
@@ -36,13 +37,14 @@ class PlayStationNetwork:
     :raises PSNAWPAuthenticationError: If npsso code is expired or is incorrect.
     """
 
-    def __init__(self, npsso: str):
+    def __init__(self, npsso: str, loop: asyncio.AbstractEventLoop) -> None:
         """Initialize PlayStationNetwork with NPSSO token."""
         self.rate = Rate(300, Duration.MINUTE * 15)
         self.psn = PSNAWP(npsso, rate_limit=self.rate)
         self.client = self.psn.me()
         self.user: User | None = None
         self.data: PlayStationNetworkData | None = None
+        self.loop = loop
 
     def validate_connection(self):
         """Validate the PSN connection by fetching the current user."""
@@ -57,20 +59,13 @@ class PlayStationNetwork:
         """Close the PSN connection and cleanup resources."""
         try:
             if hasattr(self.psn, "authenticator") and hasattr(
-                self.psn.authenticator, "session"
+                self.psn.authenticator, "request_builder"
             ):
-                # Close the aiohttp session if it exists
-                session = self.psn.authenticator.session
-                if session and not session.closed:
-                    # Schedule the session close in the event loop
-                    try:
-                        loop = asyncio.get_event_loop()
-                        if loop.is_running():
-                            asyncio.create_task(session.close())
-                        else:
-                            loop.run_until_complete(session.close())
-                    except Exception as ex:  # pylint: disable=broad-exception-caught
-                        _LOG.debug("Error closing session: %s", ex)
+                # Close the requests.Session to release connection pool resources
+                session: Session = self.psn.authenticator.request_builder.session
+                if session:
+                    session.close()
+                    _LOG.debug("PSN session closed successfully")
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.debug("Error during PSN cleanup: %s", ex)
 

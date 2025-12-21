@@ -66,7 +66,7 @@ class PSNAccount(PollingDevice):
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
         try:
-            self._psn = PlayStationNetwork(self._device_config.npsso)
+            self._psn = PlayStationNetwork(self._device_config.npsso, self._loop)
             _LOG.debug("[%s] PSN connection established", self.log_id)
             # Do initial attribute update
             await self.poll_device()

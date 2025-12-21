@@ -18,27 +18,6 @@ from ucapi_framework import BaseConfigManager, BaseIntegrationDriver, get_config
 _LOG = logging.getLogger("driver")
 
 
-class PSNIntegrationDriver(BaseIntegrationDriver[PSNAccount, PSNConfig]):
-    """
-    PSN Integration driver.
-
-    Handles PlayStation Network account management and entity lifecycle.
-    """
-
-    def device_from_entity_id(self, entity_id: str) -> str | None:
-        """
-        Extract device identifier from entity identifier.
-
-        For PSN, the entity_id IS the device identifier (account_id).
-
-        :param entity_id: Entity identifier
-        :return: Device identifier (account_id)
-        """
-        # For PSN, the entity_id IS the device identifier (account_id).
-        # It is not prefixed with media_player
-        return entity_id
-
-
 async def main():
     """Start the Remote Two integration driver."""
     logging.basicConfig()
@@ -48,8 +27,8 @@ async def main():
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
 
-    driver = PSNIntegrationDriver(
-        device_class=PSNAccount, entity_classes=[PSNMediaPlayer]
+    driver = BaseIntegrationDriver(
+        device_class=PSNAccount, entity_classes=[PSNMediaPlayer], driver_id="psn_driver"
     )
 
     driver.config_manager = BaseConfigManager(
