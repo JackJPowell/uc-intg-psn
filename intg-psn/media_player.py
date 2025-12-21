@@ -27,8 +27,7 @@ class PSNMediaPlayer(UCMediaPlayer):  # pylint: disable=too-few-public-methods
         :param device_config: PSN device configuration
         :param device: PSN account device interface
         """
-        # entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
-        entity_id = device_config.identifier  # Use account ID as entity ID
+        entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
 
         features = [
             media_player.Features.ON_OFF,
