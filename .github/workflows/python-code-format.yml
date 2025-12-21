@@ -38,12 +38,8 @@ jobs:
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f test-requirements.txt ]; then pip install -r test-requirements.txt; fi
-      - name: Analyzing the code with pylint
+
+      - name: Lint and format with Ruff
         run: |
-          python -m pylint intg-psn
-      - name: Lint with flake8
-        run: |
-          python -m flake8 intg-psn --count --show-source --statistics
-      - name: Check code formatting with isort
-        run: |
-          python -m isort intg-psn/. --check --verbose
+          python -m ruff check intg-psn
+          python -m ruff format intg-psn --check
