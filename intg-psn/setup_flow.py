@@ -103,7 +103,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         :return: True if migration is required, False otherwise
         """
         # Migrations required for versions 1.0.2 and below
-        if Version(previous_version) <= Version("1.0.2"):
+        if Version(previous_version) <= Version("1.0.4"):
             return True
         return False
 
