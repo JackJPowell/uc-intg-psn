@@ -2,5 +2,5 @@ pyee~=12.0.0
 ucapi==0.5.1
 PSNAWP==3.0.1
 pyrate_limiter==3.9.0
-ucapi-framework==1.4.0b8
+ucapi-framework==1.4.0b9
 packaging>=25.0
