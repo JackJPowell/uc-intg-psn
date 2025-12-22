@@ -10,6 +10,6 @@ dependencies = [
     "PSNAWP==3.0.1",
     "pyrate_limiter==3.9.0",
     "aiohttp>=3.13.2",
-    "ucapi-framework==1.4.0b11",
+    "ucapi-framework==1.4.0b12",
     "packaging>=25.0"
 ]
