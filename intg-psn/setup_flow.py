@@ -102,8 +102,8 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         :param previous_version: Previous version of the integration
         :return: True if migration is required, False otherwise
         """
-        # Migrations required for versions 1.0.2 and below
-        if Version(previous_version) <= Version("1.0.4"):
+        # Migrations required for versions 1.1.0 and below
+        if Version(previous_version) <= Version("1.1.0"):
             return True
         return False
 

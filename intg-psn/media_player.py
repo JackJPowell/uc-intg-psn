@@ -29,13 +29,7 @@ class PSNMediaPlayer(UCMediaPlayer):  # pylint: disable=too-few-public-methods
         """
         entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
 
-        features = [
-            media_player.Features.ON_OFF,
-            media_player.Features.TOGGLE,
-            media_player.Features.DPAD,
-            media_player.Features.SELECT_SOURCE,
-            media_player.Features.MENU,
-        ]
+        features = []
 
         attributes = {
             media_player.Attributes.STATE: media_player.States.UNKNOWN,
