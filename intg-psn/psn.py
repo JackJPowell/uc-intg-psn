@@ -12,6 +12,7 @@ from api import PlayStationNetwork, PlayStationNetworkData
 from const import PSNConfig
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
 from ucapi.media_player import Attributes as MediaAttr
+from ucapi_framework import BaseIntegrationDriver
 from ucapi_framework.device import DeviceEvents, PollingDevice
 
 _LOG = logging.getLogger(__name__)
@@ -28,10 +29,15 @@ class PSNAccount(PollingDevice):
         device_config: PSNConfig,
         loop: AbstractEventLoop | None = None,
         config_manager=None,
+        driver: BaseIntegrationDriver | None = None,
     ) -> None:
         """Create instance with 45 second poll interval."""
         super().__init__(
-            device_config, loop, poll_interval=45, config_manager=config_manager
+            device_config,
+            loop,
+            poll_interval=45,
+            config_manager=config_manager,
+            driver=driver,
         )
         self._psn: PlayStationNetwork | None = None
         self._psn_data: PlayStationNetworkData | None = None
