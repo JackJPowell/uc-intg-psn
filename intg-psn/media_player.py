@@ -12,12 +12,12 @@ from const import PSNConfig
 from psn import PSNAccount
 from ucapi import MediaPlayer as UCMediaPlayer
 from ucapi import StatusCodes, media_player, EntityTypes
-from ucapi_framework import create_entity_id
+from ucapi_framework import create_entity_id, Entity
 
 _LOG = logging.getLogger(__name__)
 
 
-class PSNMediaPlayer(UCMediaPlayer):  # pylint: disable=too-few-public-methods
+class PSNMediaPlayer(UCMediaPlayer, Entity):  # pylint: disable=too-few-public-methods
     """Media player entity for PlayStation Network."""
 
     def __init__(self, device_config: PSNConfig, device: PSNAccount):

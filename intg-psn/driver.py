@@ -38,7 +38,7 @@ async def main():
         config_class=PSNConfig,
     )
 
-    await driver.register_all_configured_devices()
+    await driver.register_all_device_instances()
 
     setup_handler = PSNSetupFlow.create_handler(driver)
     await driver.api.init("driver.json", setup_handler)

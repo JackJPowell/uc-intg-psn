@@ -11,8 +11,14 @@ from asyncio import AbstractEventLoop
 from api import PlayStationNetwork, PlayStationNetworkData
 from const import PSNConfig
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
-from ucapi.media_player import Attributes as MediaAttr
-from ucapi_framework import BaseIntegrationDriver
+from ucapi import media_player
+from ucapi.entity import EntityTypes
+from ucapi_framework import (
+    BaseIntegrationDriver,
+    Entity,
+    MediaPlayerAttributes,
+    create_entity_id,
+)
 from ucapi_framework.device import DeviceEvents, PollingDevice
 
 _LOG = logging.getLogger(__name__)
@@ -42,6 +48,14 @@ class PSNAccount(PollingDevice):
         self._psn: PlayStationNetwork | None = None
         self._psn_data: PlayStationNetworkData | None = None
 
+        # Initialize attributes dataclass for entity state
+        self.attrs = MediaPlayerAttributes(
+            STATE=media_player.States.UNKNOWN,
+            MEDIA_IMAGE_URL="",
+            MEDIA_TITLE="",
+            MEDIA_ARTIST="",
+        )
+
     @property
     def identifier(self) -> str:
         """Return the device identifier."""
@@ -68,6 +82,17 @@ class PSNAccount(PollingDevice):
     def log_id(self) -> str:
         """Return a log identifier for this device."""
         return self._device_config.name
+
+    def get_device_attributes(self, entity_id: str) -> MediaPlayerAttributes:
+        """
+        Get current device attributes as a dataclass.
+
+        This method is called by the framework to retrieve entity state.
+
+        :param entity_id: The entity ID requesting attributes
+        :return: MediaPlayerAttributes dataclass with current state
+        """
+        return self.attrs
 
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
@@ -123,45 +148,51 @@ class PSNAccount(PollingDevice):
                 )
                 return
 
-            update = {MediaAttr.STATE: "OFF"}
-
+            # Update attributes dataclass based on PSN data
             if (
                 self._psn_data.platform
                 and self._psn_data.platform.get("platform", "")
                 and self._psn_data.platform.get("onlineStatus", "") == "online"
             ):
-                update[MediaAttr.STATE] = "ON"
+                self.attrs.STATE = media_player.States.ON
                 if (
                     self._psn_data.available
                     and self._psn_data.title_metadata
                     and self._psn_data.title_metadata.get("npTitleId") is not None
                 ):
-                    update[MediaAttr.STATE] = "PLAYING"
+                    self.attrs.STATE = media_player.States.PLAYING
+            else:
+                self.attrs.STATE = media_player.States.OFF
 
-            self._state = update[MediaAttr.STATE]
+            self._state = str(self.attrs.STATE)
 
             # Add title metadata if available
             if self._psn_data.title_metadata and self._psn_data.title_metadata.get(
                 "npTitleId"
             ):
-                update[MediaAttr.MEDIA_TITLE] = self._psn_data.title_metadata.get(
-                    "titleName"
-                )
-                update[MediaAttr.MEDIA_ARTIST] = self._psn_data.title_metadata.get(
-                    "format"
-                )
+                self.attrs.MEDIA_TITLE = self._psn_data.title_metadata.get("titleName")
+                self.attrs.MEDIA_ARTIST = self._psn_data.title_metadata.get("format")
 
                 title = self._psn_data.title_metadata
                 if title.get("format", "") == "PS5":
-                    update[MediaAttr.MEDIA_IMAGE_URL] = title.get("conceptIconUrl")
+                    self.attrs.MEDIA_IMAGE_URL = title.get("conceptIconUrl")
                 elif title.get("format", "") == "PS4":
-                    update[MediaAttr.MEDIA_IMAGE_URL] = title.get("npTitleIconUrl")
+                    self.attrs.MEDIA_IMAGE_URL = title.get("npTitleIconUrl")
+            else:
+                # Clear metadata when not playing
+                self.attrs.MEDIA_TITLE = ""
+                self.attrs.MEDIA_ARTIST = ""
+                self.attrs.MEDIA_IMAGE_URL = ""
 
-            # Emit update event
-            self.events.emit(DeviceEvents.UPDATE, self.identifier, update)
-            _LOG.debug(
-                "[%s] PSN update emitted: %s", self.log_id, update.get(MediaAttr.STATE)
-            )
+            # Get entity reference and update it directly
+            if self._driver:
+                entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, self.identifier)
+                entity = self._driver.get_entity_by_id(entity_id)
+
+                # Type hint for the entity to access update method
+                if entity and isinstance(entity, Entity):
+                    # Entity has the framework's update method
+                    entity.update(self.attrs)
 
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error while polling PSN: %s", self.log_id, ex)
