@@ -47,6 +47,7 @@ class PSNAccount(PollingDevice):
         self.psn_media_title: str = ""
         self.psn_media_artist: str = ""
         self.psn_media_image_url: str = ""
+        self._total_game_count: int | None = None
 
     @property
     def identifier(self) -> str:
@@ -74,6 +75,31 @@ class PSNAccount(PollingDevice):
     def log_id(self) -> str:
         """Return a log identifier for this device."""
         return self._device_config.name
+
+    async def get_game_library(self, limit: int = 10, offset: int = 0) -> tuple[list, int | None]:
+        """
+        Fetch a page of the user's game library.
+
+        :param limit: Number of titles per page.
+        :param offset: 0-based start offset.
+        :return: Tuple of (titles list, total count or None if unknown).
+        """
+        psn = self._psn
+        if not psn:
+            return [], self._total_game_count
+        try:
+            def _fetch() -> tuple[list, int]:
+                iterator = psn.client.title_stats(limit=limit, offset=offset, page_size=limit)
+                titles = list(iterator)
+                total: int = getattr(iterator, "_total_item_count", 0)
+                return titles, total
+
+            titles, total = await self._loop.run_in_executor(None, _fetch)
+            self._total_game_count = total
+            return titles, self._total_game_count
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.error("[%s] Error fetching game library: %s", self.log_id, ex)
+            return [], self._total_game_count
 
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
