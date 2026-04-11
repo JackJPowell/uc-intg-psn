@@ -7,6 +7,7 @@ This module implements the PlayStation Network communication of the Remote integ
 
 import logging
 from asyncio import AbstractEventLoop
+from itertools import islice
 
 from api import PlayStationNetwork, PlayStationNetworkData
 from const import PSNConfig
@@ -89,8 +90,8 @@ class PSNAccount(PollingDevice):
             return [], self._total_game_count
         try:
             def _fetch() -> tuple[list, int]:
-                iterator = psn.client.title_stats(limit=limit, offset=offset, page_size=limit)
-                titles = list(iterator)
+                iterator = psn.client.title_stats(offset=offset, page_size=limit)
+                titles = list(islice(iterator, limit))
                 total: int = getattr(iterator, "_total_item_count", 0)
                 return titles, total
 
