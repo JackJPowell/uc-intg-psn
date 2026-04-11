@@ -11,7 +11,9 @@ from typing import Any
 from const import PSNConfig
 from psn import PSNAccount
 from ucapi import StatusCodes, media_player
+from ucapi.api_definitions import Pagination, Paging
 from ucapi.entity import EntityTypes
+from ucapi.media_player import BrowseMediaItem, BrowseResults
 from ucapi_framework import create_entity_id
 from ucapi_framework.entities import MediaPlayerEntity
 
@@ -33,14 +35,14 @@ class PSNMediaPlayer(MediaPlayerEntity):
         super().__init__(
             entity_id,
             device_config.name,
-            features=[],
+            features=[media_player.Features.BROWSE_MEDIA],
             attributes={
                 media_player.Attributes.STATE: media_player.States.UNKNOWN,
                 media_player.Attributes.MEDIA_IMAGE_URL: "",
                 media_player.Attributes.MEDIA_TITLE: "",
                 media_player.Attributes.MEDIA_ARTIST: "",
             },
-            device_class=media_player.DeviceClasses.TV,
+            device_class=media_player.DeviceClasses.SPEAKER,
             options={},
         )
 
@@ -83,3 +85,50 @@ class PSNMediaPlayer(MediaPlayerEntity):
         # if the PSN API supported them in the future
 
         return StatusCodes.OK
+
+    async def browse(self, options: media_player.BrowseOptions) -> BrowseResults | StatusCodes:
+        """
+        Return a page of the user's played game library for the media browser.
+
+        :param options: Browse options including paging (page, limit).
+        :return: BrowseResults with game items, or SERVICE_UNAVAILABLE if disconnected.
+        """
+        if not self._device:
+            return StatusCodes.SERVICE_UNAVAILABLE
+
+        paging: Paging = options.paging
+        titles, total = await self._device.get_game_library(
+            limit=paging.limit, offset=paging.offset
+        )
+
+        items = [
+            BrowseMediaItem(
+                media_id=title.title_id or "",
+                title=title.name or "Unknown",
+                subtitle=title.last_played_date_time.strftime("%d %b %Y")
+                if title.last_played_date_time
+                else None,
+                media_class=media_player.MediaClass.GAME,
+                can_browse=False,
+                can_play=False,
+                thumbnail=str(title.image_url) if title.image_url else None,
+            )
+            for title in titles
+        ]
+
+        container = BrowseMediaItem(
+            media_id="psn_games",
+            title="Games",
+            media_class=media_player.MediaClass.GAME,
+            can_browse=True,
+            items=items,
+        )
+
+        return BrowseResults(
+            media=container,
+            pagination=Pagination(
+                page=paging.page,
+                limit=len(items),
+                count=total,
+            ),
+        )

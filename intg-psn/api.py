@@ -69,6 +69,17 @@ class PlayStationNetwork:
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.debug("Error during PSN cleanup: %s", ex)
 
+    def get_title_stats(self, limit: int = 10, offset: int = 0) -> list:
+        """
+        Fetch a page of the user's played game library.
+
+        :param limit: Maximum number of titles to return (maps to paging limit).
+        :param offset: 0-based start offset.
+        :return: List of TitleStats objects.
+        """
+        iterator = self.client.title_stats(limit=limit, offset=offset, page_size=limit)
+        return list(iterator)
+
     def get_data(self):
         """Get the PlayStation Network data."""
         data: PlayStationNetworkData = PlayStationNetworkData(
