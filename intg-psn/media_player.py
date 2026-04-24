@@ -8,6 +8,7 @@ PlayStation Network Media Player entity for Unfolded Circle Remote Two.
 import logging
 from typing import Any
 
+import playdirector
 from const import PSNConfig
 from psn import PSNAccount
 from ucapi import StatusCodes, media_player
@@ -32,10 +33,16 @@ class PSNMediaPlayer(MediaPlayerEntity):
         """
         entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
 
+        features = [media_player.Features.BROWSE_MEDIA]
+        if device.has_control:
+            features += [media_player.Features.ON_OFF, media_player.Features.TOGGLE]
+            if device.device_type == "PS5":
+                features += [media_player.Features.HOME]
+
         super().__init__(
             entity_id,
             device_config.name,
-            features=[media_player.Features.BROWSE_MEDIA],
+            features=features,
             attributes={
                 media_player.Attributes.STATE: media_player.States.UNKNOWN,
                 media_player.Attributes.MEDIA_IMAGE_URL: "",
@@ -80,13 +87,42 @@ class PSNMediaPlayer(MediaPlayerEntity):
             "Got %s command request: %s %s", self.id, cmd_id, params if params else ""
         )
 
-        # PlayStation Network API doesn't currently support remote control commands
-        # This would be where you'd implement play/pause/stop/volume commands
-        # if the PSN API supported them in the future
+        cmd = media_player.Commands(cmd_id)
 
-        return StatusCodes.OK
+        if cmd == media_player.Commands.ON:
+            await self._device.power_on()
+            return StatusCodes.OK
+        if cmd == media_player.Commands.OFF:
+            await self._device.power_off()
+            return StatusCodes.OK
+        if cmd == media_player.Commands.TOGGLE:
+            await self._device.power_toggle()
+            return StatusCodes.OK
+        if cmd == media_player.Commands.HOME:
+            await self._device.go_home()
+            return StatusCodes.OK
 
-    async def browse(self, options: media_player.BrowseOptions) -> BrowseResults | StatusCodes:
+        # PS4 dpad / button commands → RemoteOperation
+        _PS4_BUTTON_MAP = {
+            media_player.Commands.CURSOR_UP: playdirector.RemoteOperation.UP,
+            media_player.Commands.CURSOR_DOWN: playdirector.RemoteOperation.DOWN,
+            media_player.Commands.CURSOR_LEFT: playdirector.RemoteOperation.LEFT,
+            media_player.Commands.CURSOR_RIGHT: playdirector.RemoteOperation.RIGHT,
+            media_player.Commands.CURSOR_ENTER: playdirector.RemoteOperation.ENTER,
+            media_player.Commands.BACK: playdirector.RemoteOperation.BACK,
+            media_player.Commands.MENU: playdirector.RemoteOperation.OPTION,
+            media_player.Commands.SETTINGS: playdirector.RemoteOperation.PS,
+        }
+        if cmd in _PS4_BUTTON_MAP and self._device.device_type == "PS4":
+            await self._device.send_buttons([_PS4_BUTTON_MAP[cmd]])
+            return StatusCodes.OK
+
+        _LOG.warning("[%s] Unhandled command: %s", self.id, cmd_id)
+        return StatusCodes.NOT_IMPLEMENTED
+
+    async def browse(
+        self, options: media_player.BrowseOptions
+    ) -> BrowseResults | StatusCodes:
         """
         Return a page of the user's played game library for the media browser.
 

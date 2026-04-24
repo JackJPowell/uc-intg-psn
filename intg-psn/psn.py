@@ -239,6 +239,13 @@ class PSNAccount(PollingDevice):
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] power_off failed: %s", self.log_id, ex)
 
+    async def power_toggle(self) -> None:
+        """Toggle the PlayStation power state based on current psn_state."""
+        if self.psn_state in (media_player.States.ON, media_player.States.PLAYING):
+            await self.power_off()
+        else:
+            await self.power_on()
+
     async def go_home(self) -> None:
         """Navigate to the PS5 home screen."""
         if not self._pd_credential:
