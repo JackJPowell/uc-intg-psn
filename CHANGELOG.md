@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## v2.0.0 - 2026-04-24
+
+### Added
+- **PlayStation control**: Control the power state of PS4 and PS5 consoles directly from the Remote
+- **PlayStation Discovery**: During setup your Playstation will be automatically discovered on your network
+- **Power on / Power off**: Wake console from standby or send it into rest mode
+- **PS5 home navigation**: `HOME` button command routes back to the PS5 home screen
+- **Sensor entity** (`PSNSensor`): reports the currently running media title as a sensor value
+
+### Fixed
+- **Duplicate polling task race condition**: concurrent `CONNECT` and `SUBSCRIBE_ENTITIES` events could both call `connect()` before the poll task was recorded, spawning multiple background tasks
+
+---
+
 ## v1.2.0 - 2026-04-11
 
 ### Added
