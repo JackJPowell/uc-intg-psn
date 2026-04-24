@@ -36,8 +36,12 @@ jobs:
         #Id needed for env output variable
         id: get-version-and-id
         run: |
-          # Extract version from git tag (remove 'v' prefix)
-          VERSION=${GITHUB_REF#refs/tags/v}
+          # Use manual input version when triggered via workflow_dispatch, otherwise extract from git tag
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=${{ github.event.inputs.version }}
+          else
+            VERSION=${GITHUB_REF#refs/tags/v}
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "DRIVER_ID=$(jq .driver_id -r driver.json)" >> $GITHUB_ENV
           # Save to Github output to later use it in Create Release job
