@@ -5,10 +5,13 @@ This module implements the PlayStation Network communication of the Remote integ
 :license: Mozilla Public License Version 2.0, see LICENSE for more details.
 """
 
+import asyncio
 import logging
 from asyncio import AbstractEventLoop
 from itertools import islice
+from typing import Any
 
+import playdirector
 from api import PlayStationNetwork, PlayStationNetworkData
 from const import PSNConfig
 from psnawp_api.core.psnawp_exceptions import PSNAWPAuthenticationError
@@ -50,6 +53,10 @@ class PSNAccount(PollingDevice):
         self.psn_media_image_url: str = ""
         self._total_game_count: int | None = None
 
+        # playdirector control — credential loaded from config if ps_device is set
+        self._pd_credential: playdirector.RemotePlayCredentials | None = None
+        self._connect_lock = asyncio.Lock()
+
     @property
     def identifier(self) -> str:
         """Return the device identifier."""
@@ -77,7 +84,48 @@ class PSNAccount(PollingDevice):
         """Return a log identifier for this device."""
         return self._device_config.name
 
-    async def get_game_library(self, limit: int = 10, offset: int = 0) -> tuple[list, int | None]:
+    @property
+    def has_control(self) -> bool:
+        """True if playdirector credentials are configured."""
+        return bool(self._device_config.ps_device)
+
+    @property
+    def device_type(self) -> str:
+        """Return the PlayStation device type string ('PS4', 'PS5', or 'UNKNOWN')."""
+        return self._device_config.ps_device.get("device_type", "UNKNOWN")
+
+    @property
+    def pd_device(self) -> playdirector.DiscoveredDevice | None:
+        """
+        Build a DiscoveredDevice directly from stored config — no network lookup.
+
+        Only device.ip and device.device_type are used by the control functions
+        (wake, standby, go_home, send_buttons). The TCP port is never read when
+        using RemotePlayCredentials because the remote-play session always
+        connects to port 9295 internally.
+        """
+        ps = self._device_config.ps_device
+        ip = ps.get("device_ip", "")
+        raw_type = ps.get("device_type", "UNKNOWN")
+        if not ip:
+            return None
+        try:
+            device_type = playdirector.DeviceType(raw_type)
+        except ValueError:
+            device_type = playdirector.DeviceType.UNKNOWN
+        return playdirector.DiscoveredDevice(
+            ip=ip,
+            port=0,  # unused — RemotePlayCredentials always connects to port 9295
+            device_id=ps.get("device_id", ""),
+            name=self._device_config.name,
+            status=playdirector.DeviceStatus.UNKNOWN,
+            device_type=device_type,
+            system_version="",
+        )
+
+    async def get_game_library(
+        self, limit: int = 10, offset: int = 0
+    ) -> tuple[list, int | None]:
         """
         Fetch a page of the user's game library.
 
@@ -89,6 +137,7 @@ class PSNAccount(PollingDevice):
         if not psn:
             return [], self._total_game_count
         try:
+
             def _fetch() -> tuple[list, int]:
                 iterator = psn.client.title_stats(offset=offset, page_size=limit)
                 titles = list(islice(iterator, limit))
@@ -102,11 +151,47 @@ class PSNAccount(PollingDevice):
             _LOG.error("[%s] Error fetching game library: %s", self.log_id, ex)
             return [], self._total_game_count
 
+    async def connect(self) -> bool:
+        """Establish connection, guarded against concurrent calls."""
+        if self.is_connected:
+            _LOG.debug(
+                "[%s] Already connected, skipping duplicate connect", self.log_id
+            )
+            return True
+        async with self._connect_lock:
+            # Re-check inside the lock in case another coroutine connected first
+            if self.is_connected:
+                _LOG.debug(
+                    "[%s] Connected while waiting for lock, skipping", self.log_id
+                )
+                return True
+            return await super().connect()
+
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
         try:
             self._psn = PlayStationNetwork(self._device_config.npsso, self._loop)
             _LOG.debug("[%s] PSN connection established", self.log_id)
+
+            # Load playdirector credentials if configured
+            if self._device_config.ps_device:
+                try:
+                    self._pd_credential = playdirector.RemotePlayCredentials.from_dict(
+                        self._device_config.ps_device
+                    )
+                    _LOG.info(
+                        "[%s] playdirector: credentials loaded for %s (%s)",
+                        self.log_id,
+                        self._device_config.ps_device.get("device_ip"),
+                        self.device_type,
+                    )
+                except Exception as ex:  # pylint: disable=broad-exception-caught
+                    _LOG.warning(
+                        "[%s] playdirector: failed to load credentials: %s",
+                        self.log_id,
+                        ex,
+                    )
+
             # Do initial attribute update
             await self.poll_device()
         except PSNAWPAuthenticationError as ex:
@@ -119,6 +204,76 @@ class PSNAccount(PollingDevice):
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error connecting to PSN: %s", self.log_id, ex)
             raise
+
+    # ------------------------------------------------------------------ #
+    # playdirector control methods
+    # ------------------------------------------------------------------ #
+
+    async def power_on(self) -> None:
+        """Wake the PlayStation from standby."""
+        if not self._pd_credential:
+            _LOG.warning("[%s] power_on: no credentials configured", self.log_id)
+            return
+        device = self.pd_device
+        if not device:
+            _LOG.warning("[%s] power_on: no device IP configured", self.log_id)
+            return
+        try:
+            await playdirector.wake(device, self._pd_credential)
+            _LOG.debug("[%s] power_on: wake sent", self.log_id)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.error("[%s] power_on failed: %s", self.log_id, ex)
+
+    async def power_off(self) -> None:
+        """Put the PlayStation into standby."""
+        if not self._pd_credential:
+            _LOG.warning("[%s] power_off: no credentials configured", self.log_id)
+            return
+        device = self.pd_device
+        if not device:
+            _LOG.warning("[%s] power_off: no device IP configured", self.log_id)
+            return
+        try:
+            await playdirector.standby(device, self._pd_credential)
+            _LOG.debug("[%s] power_off: standby sent", self.log_id)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.error("[%s] power_off failed: %s", self.log_id, ex)
+
+    async def go_home(self) -> None:
+        """Navigate to the PS5 home screen."""
+        if not self._pd_credential:
+            _LOG.warning("[%s] go_home: no credentials configured", self.log_id)
+            return
+        device = self.pd_device
+        if not device:
+            _LOG.warning("[%s] go_home: no device IP configured", self.log_id)
+            return
+        try:
+            await playdirector.go_home(device, self._pd_credential)
+            _LOG.debug("[%s] go_home: sent", self.log_id)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.error("[%s] go_home failed: %s", self.log_id, ex)
+
+    async def send_buttons(
+        self,
+        operations: list[Any],
+        hold_time: float = 0.1,
+    ) -> None:
+        """Send RemoteOperation button presses to a PS4."""
+        if not self._pd_credential:
+            _LOG.warning("[%s] send_buttons: no credentials configured", self.log_id)
+            return
+        device = self.pd_device
+        if not device:
+            _LOG.warning("[%s] send_buttons: no device IP configured", self.log_id)
+            return
+        try:
+            await playdirector.send_buttons(
+                device, self._pd_credential, operations, hold_time=int(hold_time * 1000)
+            )
+            _LOG.debug("[%s] send_buttons: %s sent", self.log_id, operations)
+        except Exception as ex:  # pylint: disable=broad-exception-caught
+            _LOG.error("[%s] send_buttons failed: %s", self.log_id, ex)
 
     async def disconnect(self) -> None:
         """Disconnect from PSN."""
@@ -178,8 +333,12 @@ class PSNAccount(PollingDevice):
             if self._psn_data.title_metadata and self._psn_data.title_metadata.get(
                 "npTitleId"
             ):
-                self.psn_media_title = self._psn_data.title_metadata.get("titleName") or ""
-                self.psn_media_artist = self._psn_data.title_metadata.get("format") or ""
+                self.psn_media_title = (
+                    self._psn_data.title_metadata.get("titleName") or ""
+                )
+                self.psn_media_artist = (
+                    self._psn_data.title_metadata.get("format") or ""
+                )
 
                 title = self._psn_data.title_metadata
                 if title.get("format", "") == "PS5":
