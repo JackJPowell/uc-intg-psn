@@ -14,7 +14,6 @@ from media_player import PSNMediaPlayer
 from psn import PSNAccount
 from sensor import PSNSensor
 from setup_flow import PSNSetupFlow
-from switch import PSNSwitch
 from ucapi_framework import BaseConfigManager, BaseIntegrationDriver, get_config_path
 
 _LOG = logging.getLogger("driver")
@@ -28,6 +27,8 @@ async def main():
     logging.getLogger("psn").setLevel(level)
     logging.getLogger("driver").setLevel(level)
     logging.getLogger("setup_flow").setLevel(level)
+    logging.getLogger("media_player").setLevel(level)
+    logging.getLogger("sensor").setLevel(level)
 
     driver = BaseIntegrationDriver(
         device_class=PSNAccount,
