@@ -4,3 +4,5 @@ PSNAWP==3.0.3
 pyrate_limiter>=4.0.2,<5.0.0
 ucapi-framework==1.9.1
 packaging>=25.0
+playdirector>=0.2.2
+aiohttp>=3.13.2
