@@ -12,7 +12,7 @@ import os
 from const import PSNConfig
 from media_player import PSNMediaPlayer
 from psn import PSNAccount
-from sensor import PSNSensor
+from sensor import PSNAuthenticationSensor, PSNSensor
 from setup_flow import PSNSetupFlow
 from ucapi_framework import BaseConfigManager, BaseIntegrationDriver, get_config_path
 
@@ -32,7 +32,7 @@ async def main():
 
     driver = BaseIntegrationDriver(
         device_class=PSNAccount,
-        entity_classes=[PSNMediaPlayer, PSNSensor],
+        entity_classes=[PSNMediaPlayer, PSNSensor, PSNAuthenticationSensor],
         driver_id="psn_driver",
     )
 

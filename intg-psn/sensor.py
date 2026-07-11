@@ -6,11 +6,9 @@ PlayStation Network Game Title Sensor entity for Unfolded Circle Remote Two.
 """
 
 import logging
-from typing import Any
-
 from const import PSNConfig
 from psn import PSNAccount
-from ucapi import StatusCodes, sensor
+from ucapi import sensor
 from ucapi.entity import EntityTypes
 from ucapi_framework import create_entity_id
 from ucapi_framework.entities import SensorEntity
@@ -62,5 +60,52 @@ class PSNSensor(SensorEntity):
             {
                 sensor.Attributes.STATE: state,
                 sensor.Attributes.VALUE: title,
+            }
+        )
+
+
+class PSNAuthenticationSensor(SensorEntity):
+    """Sensor entity that reports whether the NPSSO token is valid."""
+
+    def __init__(self, device_config: PSNConfig, device: PSNAccount):
+        """Initialize the NPSSO authentication-status sensor."""
+        entity_id = create_entity_id(
+            EntityTypes.SENSOR, f"{device_config.identifier}_authentication"
+        )
+
+        super().__init__(
+            entity_id,
+            f"{device_config.name} NPSSO Token",
+            features=[],
+            attributes={
+                sensor.Attributes.STATE: sensor.States.UNKNOWN,
+                sensor.Attributes.VALUE: "Checking",
+            },
+            device_class=sensor.DeviceClasses.CUSTOM,
+            options={},
+        )
+
+        self._device: PSNAccount = device
+        self._device_config = device_config
+
+        self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        """Sync NPSSO authentication state from the device."""
+        authenticated = self._device.psn_authenticated
+        if authenticated is True:
+            state = sensor.States.ON
+            value = "Valid"
+        elif authenticated is False:
+            state = sensor.States.ON
+            value = "Invalid - update NPSSO token"
+        else:
+            state = sensor.States.UNKNOWN
+            value = "Checking"
+
+        self.update(
+            {
+                sensor.Attributes.STATE: state,
+                sensor.Attributes.VALUE: value,
             }
         )

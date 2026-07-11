@@ -51,6 +51,7 @@ class PSNAccount(PollingDevice):
         self.psn_media_title: str = ""
         self.psn_media_artist: str = ""
         self.psn_media_image_url: str = ""
+        self.psn_authenticated: bool | None = None
         self._total_game_count: int | None = None
 
         # playdirector control — credential loaded from config if ps_device is set
@@ -169,38 +170,43 @@ class PSNAccount(PollingDevice):
 
     async def establish_connection(self) -> None:
         """Establish connection to PSN - called by base class connect()."""
+        # Remote Play credentials are independent from the NPSSO token. Load
+        # them first so local control remains available if PSN authentication
+        # has expired.
+        if self._device_config.ps_device:
+            try:
+                self._pd_credential = playdirector.RemotePlayCredentials.from_dict(
+                    self._device_config.ps_device
+                )
+                _LOG.info(
+                    "[%s] playdirector: credentials loaded for %s (%s)",
+                    self.log_id,
+                    self._device_config.ps_device.get("device_ip"),
+                    self.device_type,
+                )
+            except Exception as ex:  # pylint: disable=broad-exception-caught
+                _LOG.warning(
+                    "[%s] playdirector: failed to load credentials: %s",
+                    self.log_id,
+                    ex,
+                )
+
         try:
             self._psn = PlayStationNetwork(self._device_config.npsso, self._loop)
             _LOG.debug("[%s] PSN connection established", self.log_id)
 
-            # Load playdirector credentials if configured
-            if self._device_config.ps_device:
-                try:
-                    self._pd_credential = playdirector.RemotePlayCredentials.from_dict(
-                        self._device_config.ps_device
-                    )
-                    _LOG.info(
-                        "[%s] playdirector: credentials loaded for %s (%s)",
-                        self.log_id,
-                        self._device_config.ps_device.get("device_ip"),
-                        self.device_type,
-                    )
-                except Exception as ex:  # pylint: disable=broad-exception-caught
-                    _LOG.warning(
-                        "[%s] playdirector: failed to load credentials: %s",
-                        self.log_id,
-                        ex,
-                    )
-
             # Do initial attribute update
             await self.poll_device()
         except PSNAWPAuthenticationError as ex:
+            self.psn_authenticated = False
+            self.psn_state = media_player.States.UNAVAILABLE
+            self._state = str(self.psn_state)
+            self.push_update()
             _LOG.error(
                 "[%s] NPSSO Token has expired. Please rerun setup to update. %s",
                 self.log_id,
                 ex,
             )
-            raise
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error connecting to PSN: %s", self.log_id, ex)
             raise
@@ -318,6 +324,8 @@ class PSNAccount(PollingDevice):
                 )
                 return
 
+            self.psn_authenticated = True
+
             # Determine state based on PSN data
             if (
                 self._psn_data.platform
@@ -363,6 +371,16 @@ class PSNAccount(PollingDevice):
             # Notify subscribed entities
             self.push_update()
 
+        except PSNAWPAuthenticationError as ex:
+            self.psn_authenticated = False
+            self.psn_state = media_player.States.UNAVAILABLE
+            self._state = str(self.psn_state)
+            self.push_update()
+            _LOG.error(
+                "[%s] NPSSO Token has expired. Please rerun setup to update. %s",
+                self.log_id,
+                ex,
+            )
         except Exception as ex:  # pylint: disable=broad-exception-caught
             _LOG.error("[%s] Error while polling PSN: %s", self.log_id, ex)
             self.events.emit(
