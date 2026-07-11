@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## v2.0.1 - 2026-07-11
+
+### Added
+- **NPSSO token status sensor**: reports whether the configured NPSSO token is valid, invalid, or still being checked
+
+### Fixed
+- **Preserve Remote Play configuration**: updating only the NPSSO token no longer removes existing Remote Play credentials when the power-control toggle is off
+- **Local control with expired NPSSO tokens**: Remote Play credentials are loaded independently so local console commands remain available when PSN authentication expires
+
+---
+
 ## v2.0.0 - 2026-04-24
 
 ### Added
