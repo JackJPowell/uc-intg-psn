@@ -145,10 +145,26 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         self._psn_display_name = user.online_id
 
         if not input_values.get("add_control", False):
+            # Updating an expired NPSSO token must not remove an existing
+            # Remote Play pairing. The config manager replaces the whole
+            # account config with the value returned by this flow, so carry
+            # the paired-device credentials forward for this account.
+            existing_config = next(
+                (
+                    device
+                    for device in self.config.all()
+                    if device.identifier == self._psn_user_id
+                ),
+                None,
+            )
+            ps_device = (
+                dict(existing_config.ps_device) if existing_config is not None else {}
+            )
             return PSNConfig(
                 identifier=self._psn_user_id,
                 name=self._psn_display_name,
                 npsso=self._npsso,
+                ps_device=ps_device,
             )
 
         # Control opted in — store a partial config so the framework routes
