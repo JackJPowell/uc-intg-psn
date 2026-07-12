@@ -26,6 +26,15 @@ _SUB_DEVICE_SELECT = "device_select"
 _SUB_PIN = "pin"
 
 
+def _is_enabled(value: Any) -> bool:
+    """Return whether a setup checkbox value explicitly represents enabled."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return False
+
+
 class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
     """
     Setup flow for PlayStation Network integration.
@@ -144,7 +153,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         self._psn_user_id = user.account_id
         self._psn_display_name = user.online_id
 
-        if not input_values.get("add_control", False):
+        if not _is_enabled(input_values.get("add_control", False)):
             # Updating an expired NPSSO token must not remove an existing
             # Remote Play pairing. The config manager replaces the whole
             # account config with the value returned by this flow, so carry

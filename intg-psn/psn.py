@@ -193,6 +193,12 @@ class PSNAccount(PollingDevice):
 
         try:
             self._psn = PlayStationNetwork(self._device_config.npsso, self._loop)
+            # Construction validates the NPSSO token and raises
+            # PSNAWPAuthenticationError when it is invalid. Publish success
+            # immediately instead of making the authentication sensor wait for
+            # the more expensive initial account-data poll to finish.
+            self.psn_authenticated = True
+            self.push_update()
             _LOG.debug("[%s] PSN connection established", self.log_id)
 
             # Do initial attribute update
