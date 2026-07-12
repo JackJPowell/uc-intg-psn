@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## v2.0.2 - 2026-07-12
+
+### Fixed
+- **Optional Remote Play setup**: setup now completes without starting console discovery or pairing when power control is not enabled, while preserving existing Remote Play credentials during an update
+- **NPSSO token status latency**: the authentication sensor now reports a valid token immediately after authentication succeeds instead of waiting for the initial account-data poll
+
+---
+
 ## v2.0.1 - 2026-07-11
 
 ### Added
