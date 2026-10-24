@@ -1,11 +1,13 @@
 {
   "driver_id": "psn_driver",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "min_core_api": "0.20.0",
-  "name": { "en": "PlayStation Network" },
+  "name": {
+    "en": "PlayStation Network"
+  },
   "icon": "uc:gamepad-modern",
   "description": {
-    "en": "View your current PSN activity with your Remote Two/3."
+    "en": "PlayStation Network games, trophies and optional local PS4/PS5 controller support."
   },
   "developer": {
     "name": "Jack Powell",
@@ -17,7 +19,7 @@
     "title": {
       "en": "Integration setup",
       "de": "Integrationssetup",
-      "fr": "Configuration de l'intégration"
+      "fr": "Configuration de l'int\u00e9gration"
     },
     "settings": [
       {
@@ -30,12 +32,12 @@
         "field": {
           "label": {
             "value": {
-              "en": "This integration communicates with the PlayStation Network to retrieve your current game session details."
+              "en": "Choose PSN with console controls (recommended), PSN only, or advanced local-only control. Setup provides PSN sign-in links, retrieves account details and searches your network for consoles."
             }
           }
         }
       }
     ]
   },
-  "release_date": "2026-07-12"
+  "release_date": "2026-10-24"
 }

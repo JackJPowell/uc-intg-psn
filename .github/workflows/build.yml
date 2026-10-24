@@ -15,7 +15,7 @@ name: "Build & Release"
 env:
   INTG_NAME: psn
   # Python version to use in the builder image. See https://hub.docker.com/r/unfoldedcircle/r2-pyinstaller for possible versions.
-  PYTHON_VER: 3.11.12-0.3.0
+  PYTHON_VER: 3.11.13-0.7.0
 
 jobs:
   build:
@@ -61,7 +61,8 @@ jobs:
             bash -c \
             "cd /workspace && \
               python -m pip install -r requirements.txt && \
-              pyinstaller --clean --onedir --name intg-${DRIVER_ID} --collect-all zeroconf intg-${INTG_NAME}/driver.py"
+              python -m pip check && \
+              pyinstaller --clean --onedir --name intg-${DRIVER_ID} --collect-all zeroconf --collect-all playdirector --hidden-import pyremoteplay.takion_pb2 --collect-binaries Cryptodome --exclude-module pyremoteplay.gui --exclude-module pyremoteplay.gamepad intg-${INTG_NAME}/driver.py"
 
       - name: Prepare artifacts
         shell: bash
@@ -70,6 +71,8 @@ jobs:
           mv dist/intg-${{ env.DRIVER_ID }}/* artifacts/bin
           mv artifacts/bin/intg-${{ env.DRIVER_ID }} artifacts/bin/driver
           cp driver.json artifacts/
+          python3 -m pip download --no-deps --no-binary=:all: --dest artifacts/sources playdirector==0.4.0
+          python3 tools/package_sources.py artifacts --library-source artifacts/sources/playdirector-0.4.0.tar.gz
           echo "ARTIFACT_NAME=uc-intg-${{ env.DRIVER_ID }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
           
       - name: Create upload artifact archive

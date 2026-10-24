@@ -8,11 +8,21 @@
 
 Using [uc-integration-api](https://github.com/aitatoi/integration-python-library)
 
-The driver lets you view your PlayStation Network gameplay activity with the Unfolded Circle Remote Two/3.
+The driver connects PlayStation Network and optional local PS4/PS5 Remote Play control to the Unfolded Circle Remote Two/3.
 
-## Media Player
-Supported attributes:
- - View Only
+## Features
+
+- A game browser with played history, installed PS5 titles, playtime and game details.
+- Direct PS5 game launching through Sony's authenticated cloud command service.
+- Local wake/rest, navigation and controller buttons through playdirector 0.4.
+- Media player, Remote controller, power switch, a profile selector and ten sensors when PSN and a console are configured.
+- PSN-only viewing or account-ID-only local controls; local commands remain available when PSN authentication expires.
+
+Choose **PSN and console controls** during setup for the recommended path. Setup includes links to sign in to PSN and retrieve an NPSSO token, obtains your account ID automatically, then searches the local network for consoles. Select your console and enter the eight-digit Remote Play PIN from its settings. If multiple cloud consoles need to be distinguished, select one by name; no console DUID entry is needed. **PSN only** skips discovery and pairing. **Console controls without PSN** is an advanced path for users who already have their numeric/Base64 account ID. Updating credentials preserves existing IDs and pairing; additional profiles can be registered through device setup. Existing playdirector pairing records are converted after checking the console's LAN identity.
+
+Installed titles and direct launching require PSN connectivity. Inventory includes games and apps and is unavailable when Sony omits it. The profile selector chooses saved console pairings, not arbitrary console users. Both collections are available directly in the media browser.
+
+Local control uses [playdirector](https://github.com/JackJPowell/playdirector), installed from PyPI. See [third-party notices](THIRD_PARTY_NOTICES.md) for its GPL-3.0-only license and source.
 
 ## Usage
 The simpliest way to get started is by uploading this integration to your unfolded circle remote. You'll find the option on the integration tab in the web configurator. Simply upload the .tar.gz file attached to the release. This option is nice and doesn't require a separate docker instance to host the package. However, upgrading is a fully manual process. To help with this, a docker image is also provided that allows you to run it externally from the remote and easily upgrade when new versions are released. 

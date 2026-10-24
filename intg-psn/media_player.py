@@ -1,66 +1,70 @@
-"""
-PlayStation Network Media Player entity for Unfolded Circle Remote Two.
+"""PlayStation game browser and console commands.
 
-:copyright: (c) 2025 by Jack Powell.
-:license: Mozilla Public License Version 2.0, see LICENSE for more details.
+:copyright: (c) 2026 by Jack Powell.
+:license: MPL-2.0, see LICENSE for more details.
 """
 
 import logging
-from typing import Any
 
-import playdirector
-from const import PSNConfig
-from psn import PSNAccount
+from cloud import CloudError, ConsoleSelectionError, normalize_title_id
+from playdirector import BUTTONS, ConsoleError
 from ucapi import StatusCodes, media_player
-from ucapi.api_definitions import Pagination, Paging
+from ucapi.api_definitions import Pagination
 from ucapi.entity import EntityTypes
 from ucapi.media_player import BrowseMediaItem, BrowseResults
 from ucapi_framework import create_entity_id
 from ucapi_framework.entities import MediaPlayerEntity
 
 _LOG = logging.getLogger(__name__)
+BUTTON_MAP = {
+    media_player.Commands.CURSOR_UP: "UP",
+    media_player.Commands.CURSOR_DOWN: "DOWN",
+    media_player.Commands.CURSOR_LEFT: "LEFT",
+    media_player.Commands.CURSOR_RIGHT: "RIGHT",
+    media_player.Commands.CURSOR_ENTER: "CROSS",
+    media_player.Commands.BACK: "CIRCLE",
+    media_player.Commands.MENU: "OPTIONS",
+    media_player.Commands.SETTINGS: "PS",
+}
 
 
 class PSNMediaPlayer(MediaPlayerEntity):
-    """Media player entity for PlayStation Network."""
+    """Project coordinator state; browse and launch through its shared services."""
 
-    def __init__(self, device_config: PSNConfig, device: PSNAccount):
-        """
-        Initialize PSN media player entity.
-
-        :param device_config: PSN device configuration
-        :param device: PSN account device interface
-        """
-        entity_id = create_entity_id(EntityTypes.MEDIA_PLAYER, device_config.identifier)
-
-        features = [media_player.Features.BROWSE_MEDIA]
+    def __init__(self, config, device):
+        features = [media_player.Features.BROWSE_MEDIA] if device.has_psn else []
+        if device.can_launch_games:
+            features.append(media_player.Features.PLAY_MEDIA)
         if device.has_control:
-            features += [media_player.Features.ON_OFF, media_player.Features.TOGGLE]
-            if device.device_type == "PS5":
-                features += [media_player.Features.HOME]
-
+            features.extend(
+                [
+                    media_player.Features.ON_OFF,
+                    media_player.Features.TOGGLE,
+                    media_player.Features.DPAD,
+                    media_player.Features.HOME,
+                    media_player.Features.MENU,
+                    media_player.Features.SETTINGS,
+                ]
+            )
         super().__init__(
-            entity_id,
-            device_config.name,
+            create_entity_id(EntityTypes.MEDIA_PLAYER, config.identifier),
+            config.name,
             features=features,
             attributes={
                 media_player.Attributes.STATE: media_player.States.UNKNOWN,
-                media_player.Attributes.MEDIA_IMAGE_URL: "",
                 media_player.Attributes.MEDIA_TITLE: "",
                 media_player.Attributes.MEDIA_ARTIST: "",
+                media_player.Attributes.MEDIA_IMAGE_URL: "",
             },
-            device_class=media_player.DeviceClasses.SPEAKER,
-            options={},
+            device_class=media_player.DeviceClasses.STREAMING_BOX,
+            options={media_player.Options.SIMPLE_COMMANDS: sorted(BUTTONS)}
+            if device.has_control
+            else {},
         )
-
-        self._device: PSNAccount = device
-        self._device_config = device_config
-
-        # Subscribe so sync_state() is called on every push_update()
+        self._device = device
         self.subscribe_to_device(device)
 
     async def sync_state(self) -> None:
-        """Sync entity state from device to Remote."""
         self.update(
             {
                 media_player.Attributes.STATE: self._device.psn_state,
@@ -70,101 +74,175 @@ class PSNMediaPlayer(MediaPlayerEntity):
             }
         )
 
-    async def command(
-        self, cmd_id: str, params: dict[str, Any] | None = None, *, websocket: Any
-    ) -> StatusCodes:
-        """
-        Execute media player command.
-
-        :param cmd_id: Command identifier
-        :param params: Optional command parameters
-        :return: Status code
-        """
-        if not self._device:
+    async def command(self, cmd_id: str, params=None, *, websocket=None) -> StatusCodes:
+        params = params or {}
+        try:
+            if cmd_id == media_player.Commands.PLAY_MEDIA:
+                if not self._device.can_launch_games:
+                    return StatusCodes.NOT_IMPLEMENTED
+                await self._device.launch_game(
+                    normalize_title_id(params.get("media_id", ""))
+                )
+            else:
+                if not self._device.has_control:
+                    return StatusCodes.SERVICE_UNAVAILABLE
+                actions = {
+                    media_player.Commands.ON: self._device.power_on,
+                    media_player.Commands.OFF: self._device.power_off,
+                    media_player.Commands.TOGGLE: self._device.power_toggle,
+                    media_player.Commands.HOME: self._device.go_home,
+                }
+                if cmd_id in actions:
+                    await actions[cmd_id]()
+                else:
+                    button = (
+                        BUTTON_MAP.get(cmd_id)
+                        or params.get("command")
+                        or params.get("simple_command")
+                        or (cmd_id if cmd_id in BUTTONS else None)
+                    )
+                    if button not in BUTTONS:
+                        return StatusCodes.NOT_IMPLEMENTED
+                    await self._device.send_button(button)
+            return StatusCodes.OK
+        except ConsoleSelectionError:
+            return StatusCodes.CONFLICT
+        except (TypeError, ValueError):
+            return StatusCodes.BAD_REQUEST
+        except (ConsoleError, CloudError, OSError, TimeoutError):
             return StatusCodes.SERVICE_UNAVAILABLE
+        except Exception:  # noqa: BLE001 - entity command boundary reports a status code
+            _LOG.exception("PlayStation command failed")
+            return StatusCodes.SERVER_ERROR
 
-        _LOG.info(
-            "Got %s command request: %s %s", self.id, cmd_id, params if params else ""
-        )
-
-        cmd = media_player.Commands(cmd_id)
-
-        if cmd == media_player.Commands.ON:
-            await self._device.power_on()
-            return StatusCodes.OK
-        if cmd == media_player.Commands.OFF:
-            await self._device.power_off()
-            return StatusCodes.OK
-        if cmd == media_player.Commands.TOGGLE:
-            await self._device.power_toggle()
-            return StatusCodes.OK
-        if cmd == media_player.Commands.HOME:
-            await self._device.go_home()
-            return StatusCodes.OK
-
-        # PS4 dpad / button commands → RemoteOperation
-        _PS4_BUTTON_MAP = {
-            media_player.Commands.CURSOR_UP: playdirector.RemoteOperation.UP,
-            media_player.Commands.CURSOR_DOWN: playdirector.RemoteOperation.DOWN,
-            media_player.Commands.CURSOR_LEFT: playdirector.RemoteOperation.LEFT,
-            media_player.Commands.CURSOR_RIGHT: playdirector.RemoteOperation.RIGHT,
-            media_player.Commands.CURSOR_ENTER: playdirector.RemoteOperation.ENTER,
-            media_player.Commands.BACK: playdirector.RemoteOperation.BACK,
-            media_player.Commands.MENU: playdirector.RemoteOperation.OPTION,
-            media_player.Commands.SETTINGS: playdirector.RemoteOperation.PS,
-        }
-        if cmd in _PS4_BUTTON_MAP and self._device.device_type == "PS4":
-            await self._device.send_buttons([_PS4_BUTTON_MAP[cmd]])
-            return StatusCodes.OK
-
-        _LOG.warning("[%s] Unhandled command: %s", self.id, cmd_id)
-        return StatusCodes.NOT_IMPLEMENTED
-
-    async def browse(
-        self, options: media_player.BrowseOptions
-    ) -> BrowseResults | StatusCodes:
-        """
-        Return a page of the user's played game library for the media browser.
-
-        :param options: Browse options including paging (page, limit).
-        :return: BrowseResults with game items, or SERVICE_UNAVAILABLE if disconnected.
-        """
-        if not self._device:
+    async def browse(self, options: media_player.BrowseOptions):
+        if not self._device.has_psn or not self._device.psn_authenticated:
             return StatusCodes.SERVICE_UNAVAILABLE
-
-        paging: Paging = options.paging
-        titles, total = await self._device.get_game_library(
-            limit=paging.limit, offset=paging.offset
-        )
-
-        items = [
-            BrowseMediaItem(
-                media_id=title.title_id or "",
-                title=title.name or "Unknown",
-                subtitle=title.last_played_date_time.strftime("%d %b %Y")
-                if title.last_played_date_time
-                else None,
-                media_class=media_player.MediaClass.GAME,
-                can_browse=False,
-                can_play=False,
-                thumbnail=str(title.image_url) if title.image_url else None,
+        paging = options.paging
+        folder = options.media_id or "psn_library"
+        try:
+            if folder == "psn_library":
+                views = ["psn_games"]
+                if self._device.can_launch_games:
+                    views.append("installed_games")
+                labels = {
+                    "psn_games": "Recently played",
+                    "installed_games": "Installed games & apps",
+                }
+                all_items = [
+                    BrowseMediaItem(
+                        media_id=key,
+                        title=labels[key],
+                        media_class=media_player.MediaClass.DIRECTORY,
+                        can_browse=True,
+                        can_play=False,
+                    )
+                    for key in views
+                ]
+                items, total, title = (
+                    all_items[paging.offset : paging.offset + paging.limit],
+                    len(all_items),
+                    "PlayStation library",
+                )
+            elif folder not in {"installed_games", "psn_games"}:
+                title_id = normalize_title_id(folder.removeprefix("details:"))
+                stats = await self._device.get_game_details(title_id)
+                title = stats.name if stats and stats.name else title_id
+                duration = stats.play_duration if stats else None
+                details = [
+                    (
+                        "Playtime",
+                        f"{duration.total_seconds() / 3600:.1f} hours"
+                        if duration is not None
+                        else "Unavailable",
+                    ),
+                    (
+                        "Play count",
+                        str(stats.play_count)
+                        if stats and stats.play_count is not None
+                        else "Unavailable",
+                    ),
+                    (
+                        "First played",
+                        stats.first_played_date_time.isoformat()
+                        if stats and stats.first_played_date_time
+                        else "Unavailable",
+                    ),
+                    (
+                        "Last played",
+                        stats.last_played_date_time.isoformat()
+                        if stats and stats.last_played_date_time
+                        else "Unavailable",
+                    ),
+                ]
+                all_items = [
+                    BrowseMediaItem(
+                        media_id=title_id,
+                        title="Launch game",
+                        can_play=self._device.can_launch_games,
+                        can_browse=False,
+                        media_class=media_player.MediaClass.GAME,
+                    )
+                ] + [
+                    BrowseMediaItem(
+                        media_id=f"stat:{index}:{title_id}",
+                        title=f"{key}: {value}",
+                        can_play=False,
+                        can_browse=False,
+                    )
+                    for index, (key, value) in enumerate(details)
+                ]
+                items, total = (
+                    all_items[paging.offset : paging.offset + paging.limit],
+                    len(all_items),
+                )
+            elif folder in {"installed_games", "psn_games"}:
+                if folder == "installed_games":
+                    games, total = await self._device.get_installed_game_library(
+                        paging.limit, paging.offset
+                    )
+                    title = "Installed games & apps"
+                else:
+                    rows, total = await self._device.get_game_library(
+                        paging.limit, paging.offset
+                    )
+                    games = [
+                        {
+                            "title_id": row.title_id,
+                            "name": row.name,
+                            "image": row.image_url,
+                        }
+                        for row in rows
+                        if row.title_id
+                    ]
+                    title = "Recently played"
+                items = [
+                    BrowseMediaItem(
+                        media_id=normalize_title_id(game["title_id"]),
+                        title=(game.get("name") or game["title_id"])[:255],
+                        thumbnail=str(game.get("image") or "icon://uc:gamepad-modern"),
+                        media_class=media_player.MediaClass.GAME,
+                        can_browse=True,
+                        can_play=self._device.can_launch_games,
+                    )
+                    for game in games
+                ]
+            else:
+                return StatusCodes.BAD_REQUEST
+            return BrowseResults(
+                media=BrowseMediaItem(
+                    media_id=folder,
+                    title=title[:255],
+                    media_class=media_player.MediaClass.DIRECTORY,
+                    can_browse=True,
+                    can_play=False,
+                    items=items,
+                ),
+                pagination=Pagination(
+                    page=paging.page, limit=paging.limit, count=total
+                ),
             )
-            for title in titles
-        ]
-
-        container = BrowseMediaItem(
-            media_id="psn_games",
-            title="Games",
-            media_class=media_player.MediaClass.GAME,
-            can_browse=True,
-            items=items,
-        )
-
-        return BrowseResults(
-            media=container,
-            pagination=Pagination(
-                page=paging.page,
-                limit=len(items),
-                count=total,
-            ),
-        )
+        except (ValueError, TypeError):
+            return StatusCodes.BAD_REQUEST
+        except (CloudError, OSError, TimeoutError):
+            return StatusCodes.SERVICE_UNAVAILABLE

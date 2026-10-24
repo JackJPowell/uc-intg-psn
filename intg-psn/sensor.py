@@ -6,6 +6,8 @@ PlayStation Network Game Title Sensor entity for Unfolded Circle Remote Two.
 """
 
 import logging
+from typing import ClassVar
+
 from const import PSNConfig
 from psn import PSNAccount
 from ucapi import sensor
@@ -101,11 +103,67 @@ class PSNAuthenticationSensor(SensorEntity):
             value = "Invalid - update NPSSO token"
         else:
             state = sensor.States.UNKNOWN
-            value = "Checking"
+            value = "Checking" if self._device.has_psn else "Not configured"
 
         self.update(
             {
                 sensor.Attributes.STATE: state,
                 sensor.Attributes.VALUE: value,
+            }
+        )
+
+
+class PSNDiagnosticSensor(SensorEntity):
+    """Additional metrics share the coordinator's data and have no network I/O."""
+
+    TYPES: ClassVar[dict[str, tuple[str, str]]] = {
+        "active_title_id": ("Active Title ID", ""),
+        "connection": ("Remote Play Connection Status", ""),
+        "psn_health": ("PSN API Health", ""),
+        "installed_titles": ("Installed Titles", "titles"),
+        "trophy_level": ("Trophy Level", "level"),
+        "earned_trophies": ("Earned Trophies", "trophies"),
+        "platinum_trophies": ("Platinum Trophies", "trophies"),
+        "current_game_trophies": ("Current Game Trophy Progress", "%"),
+    }
+
+    def __init__(self, config, device, kind):
+        label, unit = self.TYPES[kind]
+        super().__init__(
+            create_entity_id(EntityTypes.SENSOR, config.identifier, kind),
+            f"{config.name} {label}",
+            features=[],
+            attributes={
+                sensor.Attributes.STATE: sensor.States.UNKNOWN,
+                sensor.Attributes.VALUE: "",
+            },
+            device_class=sensor.DeviceClasses.CUSTOM,
+            options={sensor.Options.CUSTOM_UNIT: unit} if unit else {},
+        )
+        self._device, self._kind = device, kind
+        self.subscribe_to_device(device)
+
+    async def sync_state(self) -> None:
+        device, kind = self._device, self._kind
+        summary = device.trophy_summary or {}
+        values = {
+            "active_title_id": device.psn_media_title_id or None,
+            "connection": device.connection_status,
+            "psn_health": device.api_health,
+            "installed_titles": device.installed_count
+            if device.installed_inventory_available
+            else None,
+            "trophy_level": summary.get("level"),
+            "earned_trophies": summary.get("earned"),
+            "platinum_trophies": summary.get("platinum"),
+            "current_game_trophies": device.active_trophy_progress,
+        }
+        value = values[kind]
+        self.update(
+            {
+                sensor.Attributes.STATE: sensor.States.ON
+                if value is not None
+                else sensor.States.UNKNOWN,
+                sensor.Attributes.VALUE: value if value is not None else "",
             }
         )

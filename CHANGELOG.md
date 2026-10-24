@@ -9,12 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+- Maintained playdirector Remote Play engine, controller Remote entity, power switch and a profile selector.
+- Active title ID for automations, connection/API health, installed-title count and four trophy sensors.
+- Installed/recent game browsing, playtime details and confirmed Sony cloud game launching.
+- Account-ID-only local setup, additional paired profiles and verified legacy-credential migration.
+
+### Changed
+- Keep entity state in the existing coordinator/subscription pattern, with observed LAN power independent of PSN availability.
+- Serialize PSNAWP access, share cached public-library models, bound HTTP requests and validate authentication through real requests.
+- Share the 300-request/15-minute PSN budget across configured devices and setup; cache inventory metadata for one hour.
+- Avoid resetting the current-game trophy timer repeatedly while its refresh is pending.
+- Preserve PSNAWP's limiter lifecycle when enforcing the shared request budget to avoid a background cleanup-thread race.
+- Restore PSN sign-in/token links and separate the recommended setup from PSN-only and advanced local-only modes.
+- Retrieve account IDs automatically, discover consoles by default, retry discovery across network interfaces, and select cloud consoles by name.
+- Preserve the saved cloud console selection when refreshing PSN credentials.
+- Distinguish discovered consoles by IP, power state and running game; show reported models and console names in cloud selection.
+- Restore now-playing title, artwork and game platform for PS4 titles running on PS5; use matching cached metadata when LAN status omits artwork.
+- Require playdirector 0.4.0
+
 ---
 
 ## v2.0.2 - 2026-07-12
 
 ### Fixed
-- **Optional Remote Play setup**: setup now completes without starting console discovery or pairing when power control is not enabled, while preserving existing Remote Play credentials during an update
+- **Optional Remote Play setup**: setup now completes without starting console discovery or pairing when power control is not enabled
 - **NPSSO token status latency**: the authentication sensor now reports a valid token immediately after authentication succeeds instead of waiting for the initial account-data poll
 
 ---

@@ -1,0 +1,12 @@
+.git
+.venv
+.ruff_cache
+.pytest_cache
+config
+__pycache__
+*.pyc
+dist
+build
+.aws
+.agents
+.codex

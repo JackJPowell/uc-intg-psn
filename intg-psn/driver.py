@@ -12,11 +12,52 @@ import os
 from const import PSNConfig
 from media_player import PSNMediaPlayer
 from psn import PSNAccount
-from sensor import PSNAuthenticationSensor, PSNSensor
+from remote_control import PSNRemote
+from selection import PSNSelect
+from sensor import PSNAuthenticationSensor, PSNDiagnosticSensor, PSNSensor
 from setup_flow import PSNSetupFlow
+from switch import PSNSwitch
 from ucapi_framework import BaseConfigManager, BaseIntegrationDriver, get_config_path
 
 _LOG = logging.getLogger("driver")
+
+
+def entities_for_device(config, device):
+    """Keep original IDs, with framework sub-entity IDs for additional metrics."""
+    entities = [
+        PSNMediaPlayer(config, device),
+        PSNSensor(config, device),
+        PSNAuthenticationSensor(config, device),
+    ]
+    for kind in PSNDiagnosticSensor.TYPES:
+        if kind in {"active_title_id", "connection", "psn_health"} or device.has_psn:
+            entities.append(PSNDiagnosticSensor(config, device, kind))
+    if device.has_control:
+        entities.extend(
+            [
+                PSNSwitch(config, device),
+                PSNRemote(config, device),
+                PSNSelect(config, device),
+            ]
+        )
+    return entities
+
+
+class PSNIntegrationDriver(BaseIntegrationDriver):
+    """Resolve the original authentication sensor without renaming its entity."""
+
+    def device_from_entity_id(self, entity_id: str) -> str | None:
+        parsed = super().device_from_entity_id(entity_id)
+        if (
+            parsed
+            and self.get_device_config(parsed) is None
+            and entity_id.startswith("sensor.")
+            and parsed.endswith("_authentication")
+        ):
+            base = parsed.removesuffix("_authentication")
+            if self.get_device_config(base) is not None:
+                return base
+        return parsed
 
 
 async def main():
@@ -30,9 +71,9 @@ async def main():
     logging.getLogger("media_player").setLevel(level)
     logging.getLogger("sensor").setLevel(level)
 
-    driver = BaseIntegrationDriver(
+    driver = PSNIntegrationDriver(
         device_class=PSNAccount,
-        entity_classes=[PSNMediaPlayer, PSNSensor, PSNAuthenticationSensor],
+        entity_classes=[entities_for_device],
         driver_id="psn_driver",
     )
 

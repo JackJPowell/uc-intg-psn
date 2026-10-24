@@ -43,3 +43,4 @@ jobs:
         run: |
           python -m ruff check intg-psn
           python -m ruff format intg-psn --check
+          python -m pytest tests

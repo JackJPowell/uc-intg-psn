@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 from const import PSNConfig
+from playdirector import ConsoleError
 from psn import PSNAccount
 from ucapi import StatusCodes, switch
 from ucapi.entity import EntityTypes
@@ -51,8 +52,10 @@ class PSNSwitch(SwitchEntity):
             media_player.States.PLAYING,
         ):
             state = switch.States.ON
-        else:
+        elif self._device.psn_state == media_player.States.OFF:
             state = switch.States.OFF
+        else:
+            state = switch.States.UNAVAILABLE
 
         self.update({switch.Attributes.STATE: state})
 
@@ -73,17 +76,15 @@ class PSNSwitch(SwitchEntity):
             "Got %s command request: %s %s", self.id, cmd_id, params if params else ""
         )
 
-        cmd = switch.Commands(cmd_id)
-
-        if cmd == switch.Commands.ON:
-            await self._device.power_on()
+        actions = {
+            switch.Commands.ON: self._device.power_on,
+            switch.Commands.OFF: self._device.power_off,
+            switch.Commands.TOGGLE: self._device.power_toggle,
+        }
+        if cmd_id not in actions:
+            return StatusCodes.NOT_IMPLEMENTED
+        try:
+            await actions[cmd_id]()
             return StatusCodes.OK
-        if cmd == switch.Commands.OFF:
-            await self._device.power_off()
-            return StatusCodes.OK
-        if cmd == switch.Commands.TOGGLE:
-            await self._device.power_toggle()
-            return StatusCodes.OK
-
-        _LOG.warning("[%s] Unhandled command: %s", self.id, cmd_id)
-        return StatusCodes.NOT_IMPLEMENTED
+        except (ConsoleError, OSError, TimeoutError):
+            return StatusCodes.SERVICE_UNAVAILABLE
