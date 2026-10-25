@@ -1,12 +1,14 @@
-FROM python:3.11-slim-bullseye AS wheels
+FROM python:3.11-slim-bookworm AS wheels
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+RUN apt-get update -o APT::Update::Error-Mode=any \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 RUN pip download --no-deps --no-binary=:all: --dest /sources playdirector==0.4.0
 
-FROM python:3.11-slim-bullseye
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -26,6 +28,6 @@ ENV UC_INTEGRATION_INTERFACE="0.0.0.0"
 ENV UC_INTEGRATION_HTTP_PORT="9090"
 
 ENV UC_CONFIG_HOME="/config"
-LABEL org.opencontainers.image.source https://github.com/jackjpowell/uc-intg-psn
+LABEL org.opencontainers.image.source="https://github.com/jackjpowell/uc-intg-psn"
 
 CMD ["python3", "-u", "intg-psn/driver.py"]
