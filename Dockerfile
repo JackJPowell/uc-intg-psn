@@ -1,4 +1,4 @@
-FROM python:3.11-slim-bookworm AS wheels
+FROM python:3.15-slim-bookworm AS wheels
 
 RUN apt-get update -o APT::Update::Error-Mode=any \
     && apt-get install -y --no-install-recommends build-essential \
@@ -8,7 +8,7 @@ COPY requirements.txt .
 RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 RUN pip download --no-deps --no-binary=:all: --dest /sources playdirector==0.4.0
 
-FROM python:3.11-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 WORKDIR /app
 
