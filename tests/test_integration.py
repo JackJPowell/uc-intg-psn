@@ -205,6 +205,54 @@ async def test_switch_command_failures_are_reported():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [{}, {"status-code": 620}])
+async def test_power_on_keeps_entities_on_during_startup_then_expires(
+    monkeypatch, status
+):
+    device = PSNAccount(config())
+    device._control = SimpleNamespace(wake=AsyncMock())
+    device._local_status = {"status-code": 620}
+    monkeypatch.setattr("psn.time.monotonic", lambda: 100)
+    await device.power_on()
+    device._local_status = status
+    device._publish()
+    for entity, attributes, states in (
+        (
+            PSNMediaPlayer(device._device_config, device),
+            media_player.Attributes,
+            media_player.States,
+        ),
+        (PSNRemote(device._device_config, device), remote.Attributes, remote.States),
+        (PSNSwitch(device._device_config, device), switch.Attributes, switch.States),
+    ):
+        attach(entity)
+        await entity.sync_state()
+        assert entity.attributes[attributes.STATE] == states.ON
+    monkeypatch.setattr("psn.time.monotonic", lambda: 161)
+    device._publish()
+    assert device.psn_state == (
+        media_player.States.OFF if status else media_player.States.UNAVAILABLE
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_window_ends_when_console_is_on_or_power_off_requested():
+    device = PSNAccount(config())
+    device._control = SimpleNamespace(wake=AsyncMock(), standby=AsyncMock())
+    await device.power_on()
+    device._local_status = {"status-code": 200}
+    device._publish()
+    device._local_status = {}
+    device._publish()
+    assert device.psn_state == media_player.States.UNAVAILABLE
+    await device.power_on()
+    await device.power_off()
+    device._local_status = {"status-code": 620}
+    device._publish()
+    assert device.psn_state == media_player.States.OFF
+
+
+@pytest.mark.asyncio
 async def test_remote_validates_entire_sequence_before_input_and_forwards_hold():
     cfg = config()
     device = PSNAccount(cfg)

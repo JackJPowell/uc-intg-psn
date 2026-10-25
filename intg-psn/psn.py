@@ -58,6 +58,7 @@ class PSNAccount(PollingDevice):
         self._presence_data = None
         self._local_status: dict = {}
         self._local_reachable: bool | None = None
+        self._power_on_until = 0.0
         self._total_game_count: int | None = None
         self._installed_ids: list[str] = []
         self._installed_metadata: dict[str, dict] = {}
@@ -205,7 +206,7 @@ class PSNAccount(PollingDevice):
         await self.poll_device()
 
     def _publish(self) -> None:
-        """Derive one observed snapshot; never infer power from command submission."""
+        """Publish console state, allowing a short startup window after wake."""
         data = (
             self._presence_data
             if time.monotonic() - self._presence_time < 120
@@ -215,9 +216,11 @@ class PSNAccount(PollingDevice):
         title = dict(data.title_metadata) if data else {}
         if self.has_control:
             code = self._local_status.get("status-code")
+            if code == 200:
+                self._power_on_until = 0.0
             state = (
                 media_player.States.ON
-                if code == 200
+                if code == 200 or time.monotonic() < self._power_on_until
                 else media_player.States.OFF
                 if code == 620
                 else media_player.States.UNAVAILABLE
@@ -481,8 +484,11 @@ class PSNAccount(PollingDevice):
 
     async def power_on(self) -> None:
         await self._control_command("wake")
+        self._power_on_until = time.monotonic() + 60
+        self._publish()
 
     async def power_off(self) -> None:
+        self._power_on_until = 0.0
         await self._control_command("standby")
 
     async def power_toggle(self) -> None:
