@@ -845,3 +845,238 @@ async def test_presence_from_another_console_platform_does_not_set_local_game():
         == device.psn_media_image_url
         == ""
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duplicate_console", [False, True])
+async def test_add_second_ps5_reuses_account_and_keeps_first_console_independent(
+    monkeypatch, duplicate_console
+):
+    from ucapi import RequestUserInput, SetupComplete
+    from ucapi_framework.setup import SetupSteps
+
+    first = config(launch_device_id="first-cloud")
+    first.name = "PS5"
+    first.console_host_id = "aa:bb:cc:dd:ee:ff"
+    first.ps_device.update(host_id="aabbccddeeff", host_name="PS5")
+    saved_first = copy.deepcopy(first)
+    entries = {first.identifier: first}
+    manager = SimpleNamespace(
+        all=lambda: list(entries.values()),
+        get=entries.get,
+        contains=lambda identifier: identifier in entries,
+        add_or_update=lambda value: entries.__setitem__(value.identifier, value),
+        remove=Mock(),
+    )
+    flow = PSNSetupFlow(
+        manager, driver=SimpleNamespace(loop=asyncio.get_running_loop())
+    )
+    flow._setup_step = SetupSteps.MANUAL_ENTRY
+    flow._add_mode = True
+    flow._await_setup_completion = AsyncMock()
+    flow.get_manual_entry_form()
+    account_form = await flow._handle_user_data_response(
+        SimpleNamespace(input_values={"setup_mode": "psn_console"})
+    )
+    assert "psn_account" in {row["id"] for row in account_form.settings}
+    cloud_rows = [
+        {"duid": "first-cloud", "device": {"name": "PS5"}},
+        {"duid": "second-cloud", "device": {"name": "PS5 Pro"}},
+    ]
+    api = SimpleNamespace(
+        get_user=lambda: SimpleNamespace(account_id="123", online_id="Player"),
+        psn=SimpleNamespace(authenticator=object()),
+        close=Mock(),
+    )
+    create_api = Mock(return_value=api)
+    monkeypatch.setattr("setup_flow.PlayStationNetwork", create_api)
+    monkeypatch.setattr(
+        "setup_flow.SonyConsoleService",
+        lambda auth: SimpleNamespace(consoles=lambda: cloud_rows),
+    )
+    monkeypatch.setattr(
+        "setup_flow.scan",
+        AsyncMock(
+            return_value=[
+                {"host-ip": "192.0.2.2", "host-name": "PS5", "host-type": "PS5"}
+            ]
+        ),
+    )
+    await flow._handle_user_data_response(
+        SimpleNamespace(input_values={"psn_account": first.identifier, "npsso": ""})
+    )
+    create_api.assert_called_once_with(first.npsso, flow.driver.loop)
+    assert flow._pending_device_config.ps_device == {}
+    assert flow._pending_device_config.launch_device_id == ""
+    await flow._handle_user_data_response(
+        SimpleNamespace(input_values={"device_choice": "192.0.2.2"})
+    )
+    new_host_id = "aabbccddeeff" if duplicate_console else "112233445566"
+    credentials = {
+        "device_ip": "192.0.2.2",
+        "device_type": "PS5",
+        "host_id": new_host_id,
+        "host_name": "PS5",
+        "user": "paired-user",
+        "profiles": {},
+    }
+    monkeypatch.setattr("setup_flow.pair_console", AsyncMock(return_value=credentials))
+    result = await flow._handle_user_data_response(
+        SimpleNamespace(input_values={"pin": "12345678"})
+    )
+    assert first == saved_first
+    if duplicate_console:
+        assert isinstance(result, RequestUserInput)
+        assert "already configured" in str(result.settings)
+        assert len(entries) == 1
+    else:
+        assert flow._stage == "cloud_select"
+        assert len(entries) == 1
+        result = await flow._handle_user_data_response(
+            SimpleNamespace(input_values={"cloud_console": "second-cloud"})
+        )
+        assert isinstance(result, SetupComplete)
+        assert len(entries) == 2
+        second = entries["console_112233445566"]
+        assert second.ps_device == credentials
+        assert second.launch_device_id == "second-cloud"
+        assert second.psn_account_id == first.psn_account_id
+        assert second.name == "PS5 (192.0.2.2)"
+        assert first == saved_first
+    manager.remove.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pairing_retry_can_correct_discovered_console_ip(monkeypatch):
+    flow = new_setup_flow()
+    flow._pending_device_config = PSNConfig("", "PS5", psn_account_id="123")
+    flow._stage = "pin"
+    flow._selected_ip = "192.0.2.1"
+    flow._profile_name = "paired-user"
+    flow._add_profile = False
+    credentials = {
+        "device_ip": "192.0.2.2",
+        "device_type": "PS5",
+        "host_id": "112233445566",
+    }
+    pair = AsyncMock(side_effect=[OSError("unreachable"), credentials])
+    monkeypatch.setattr("setup_flow.pair_console", pair)
+    result = await flow.handle_additional_configuration_response(
+        SimpleNamespace(input_values={"pin": "12345678"})
+    )
+    ip_field = next(row for row in result.settings if row["id"] == "manual_ip")
+    assert ip_field["field"]["text"]["value"] == "192.0.2.1"
+    result = await flow.handle_additional_configuration_response(
+        SimpleNamespace(input_values={"manual_ip": "192.0.2.2", "pin": "87654321"})
+    )
+    pair.assert_awaited_with("192.0.2.2", "123", "87654321", "paired-user")
+    assert result.ps_device == credentials
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("has_local_identity", [False, True])
+async def test_update_cannot_pair_a_different_or_already_configured_console(
+    monkeypatch, has_local_identity
+):
+    flow = new_setup_flow()
+    selected = PSNConfig("selected", "Original", psn_account_id="123")
+    if has_local_identity:
+        selected.console_host_id = "aa:bb:cc:dd:ee:ff"
+    other = PSNConfig("other", "Other", console_host_id="11:22:33:44:55:66")
+    entries = {item.identifier: item for item in [selected, other]}
+    flow.config = SimpleNamespace(get=entries.get, all=lambda: list(entries.values()))
+    flow._selected_config_id = selected.identifier
+    flow._pending_device_config = copy.deepcopy(selected)
+    flow._stage = "pin"
+    flow._profile_name = "paired-user"
+    flow._add_profile = False
+    monkeypatch.setattr(
+        "setup_flow.pair_console",
+        AsyncMock(return_value={"host_id": "112233445566"}),
+    )
+    result = await flow.handle_additional_configuration_response(
+        SimpleNamespace(input_values={"manual_ip": "192.0.2.2", "pin": "12345678"})
+    )
+    expected = (
+        "differs from the saved console" if has_local_identity else "already configured"
+    )
+    assert expected in str(result.settings)
+    assert flow._pending_device_config == selected
+
+
+@pytest.mark.asyncio
+async def test_existing_psn_only_account_can_enable_controls_using_connection_mode(
+    monkeypatch,
+):
+    flow = new_setup_flow()
+    selected = PSNConfig("123", "Player", "secret", psn_account_id="123")
+    flow.config = SimpleNamespace(get=lambda _: selected)
+    flow._selected_config_id = selected.identifier
+    form = await flow.query_device({"setup_mode": "psn_console"})
+    assert "add_control" not in {row["id"] for row in form.settings}
+    api = SimpleNamespace(
+        get_user=lambda: SimpleNamespace(account_id="123", online_id="Player"),
+        psn=SimpleNamespace(authenticator=Auth()),
+        close=Mock(),
+    )
+    monkeypatch.setattr("setup_flow.PlayStationNetwork", lambda *args: api)
+    search = AsyncMock(return_value=[])
+    monkeypatch.setattr("setup_flow.scan", search)
+    monkeypatch.setattr("setup_flow.async_search", AsyncMock(return_value=[]))
+    await flow.query_device({"npsso": ""})
+    search.assert_awaited_once()
+    assert flow._stage == "select"
+    assert selected.ps_device == {}
+
+
+@pytest.mark.asyncio
+async def test_existing_console_can_change_cloud_selection_without_repairing(
+    monkeypatch,
+):
+    flow = new_setup_flow()
+    selected = config(launch_device_id="old-cloud")
+    original = copy.deepcopy(selected)
+    flow.config = SimpleNamespace(get=lambda _: selected)
+    flow._selected_config_id = selected.identifier
+    form = await flow.query_device({"setup_mode": "psn_console"})
+    assert "change_cloud_console" in {row["id"] for row in form.settings}
+    api = SimpleNamespace(
+        get_user=lambda: SimpleNamespace(account_id="123", online_id="Player"),
+        psn=SimpleNamespace(authenticator=object()),
+        close=Mock(),
+    )
+    monkeypatch.setattr("setup_flow.PlayStationNetwork", lambda *args: api)
+    monkeypatch.setattr(
+        "setup_flow.SonyConsoleService",
+        lambda auth: SimpleNamespace(
+            consoles=lambda: [
+                {"duid": "old-cloud", "device": {"name": "Living Room"}},
+                {"duid": "new-cloud", "device": {"name": "Office"}},
+            ]
+        ),
+    )
+    pair = AsyncMock(side_effect=AssertionError("Pairing must be preserved"))
+    monkeypatch.setattr("setup_flow.pair_console", pair)
+    await flow.query_device({"change_cloud_console": True})
+    assert flow._stage == "cloud_select"
+    result = await flow.handle_additional_configuration_response(
+        SimpleNamespace(input_values={"cloud_console": "new-cloud"})
+    )
+    assert result.launch_device_id == "new-cloud"
+    assert result.ps_device == selected.ps_device
+    assert selected == original
+    pair.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_second_console_does_not_automatically_reuse_first_cloud_selection():
+    flow = new_setup_flow()
+    first = config(launch_device_id="first-cloud")
+    flow.config = SimpleNamespace(all=lambda: [first])
+    flow._cloud_consoles = [{"duid": "first-cloud", "device": {"name": "PS5"}}]
+    second = config()
+    second.identifier = "second"
+    result = flow._finish_console(second)
+    assert flow._stage == "cloud_select"
+    assert "configured for PlayStation" in str(result.settings)
+    assert second.launch_device_id == ""
