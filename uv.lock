@@ -323,7 +323,7 @@ wheels = [
 
 [[package]]
 name = "playdirector"
-version = "0.4.1"
+version = "0.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -337,9 +337,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/a1/6fa8d20893124cd4bc1cd01273368206e8a9a698ba678ce61fce00377a75/playdirector-0.4.1.tar.gz", hash = "sha256:ae143bb38bcfa9ce9fb3d4087eea87e84a0d7e2dcdf8b40a9be2810dda8daf00", size = 176203, upload-time = "2026-10-25T17:30:56.669Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/52/5a83097cf69eeac298ff75efe824b27baf2c15dbef335d05cc61854f484f/playdirector-0.4.2.tar.gz", hash = "sha256:11a6ffe969772fc9f7ddfa633e1b182297f6d7946f9c6738b24b9a2902c3c58e", size = 176186, upload-time = "2026-10-25T17:48:24.122Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/a9/a25ad20d58f730c069ae7532c57f6140d2f60cd91df8a98b7a617f3d9d1f/playdirector-0.4.1-py3-none-any.whl", hash = "sha256:9cfc5823d68e7f7f4046b88ed3a3a001c74088c483981229ceb65f226d1b6f5a", size = 159823, upload-time = "2026-10-25T17:30:55.155Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/0c/edb2867ff59735cd3d56545ed9299cdb6aedb97e3761772113b982009ac3/playdirector-0.4.2-py3-none-any.whl", hash = "sha256:a8bdf752a487f888ec3e34f8858758fbe1e45d445d5ab021882ff9488b118b27", size = 159825, upload-time = "2026-10-25T17:48:22.545Z" },
 ]
 
 [[package]]
@@ -601,7 +601,7 @@ wheels = [
 
 [[package]]
 name = "uc-intg-psn"
-version = "3.0.0"
+version = "3.0.1"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -626,7 +626,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.2" },
     { name = "packaging", specifier = ">=25.0" },
-    { name = "playdirector", specifier = "==0.4.1" },
+    { name = "playdirector", specifier = "==0.4.2" },
     { name = "psnawp", specifier = "==3.0.3" },
     { name = "pyee", specifier = ">=12,<13" },
     { name = "pyrate-limiter", specifier = ">=4.0.2,<5.0.0" },

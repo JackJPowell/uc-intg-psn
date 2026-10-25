@@ -12,7 +12,7 @@ dependencies = [
     "aiohttp>=3.13.2",
     "ucapi-framework==1.9.8",
     "packaging>=25.0",
-    "playdirector==0.4.1",
+    "playdirector==0.4.2",
 ]
 
 [dependency-groups]
