@@ -19,7 +19,7 @@ from const import PSNConfig
 from driver import PSNIntegrationDriver, entities_for_device
 from media_player import PSNMediaPlayer
 from playdirector import ConsoleError
-from psn import PSNAccount
+from psn import DiagnosticRPDevice, PSNAccount
 from psnawp_api.core.psnawp_exceptions import PSNAWPUnauthorizedError
 from remote_control import PSNRemote
 from selection import PSNSelect
@@ -29,6 +29,33 @@ from switch import PSNSwitch
 from ucapi import StatusCodes, media_player, remote, select, switch
 from ucapi.api_definitions import Paging
 from ucapi_framework import BaseIntegrationDriver
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_standby_logs_session_before_controller_cleanup(
+    monkeypatch, caplog, failure
+):
+    session = SimpleNamespace(is_stopped=False, is_ready=True, disconnect_reason="")
+    device = DiagnosticRPDevice("192.0.2.1", fetch_media=False)
+    device._session = session
+
+    async def standby(self, *args, **kwargs):
+        session.disconnect_reason = "standby"
+        session.is_stopped = True
+        if failure:
+            raise TimeoutError("standby timed out")
+        return False
+
+    monkeypatch.setattr("psn.RPDevice.standby", standby)
+    if failure:
+        with pytest.raises(TimeoutError):
+            await device.standby()
+    else:
+        assert await device.standby() is False
+    assert "disconnect_reason='standby'" in caplog.text
+    assert "is_stopped=True" in caplog.text
+    assert f"result={'None' if failure else 'False'}" in caplog.text
 
 
 def attach(entity):
@@ -205,15 +232,18 @@ async def test_switch_command_failures_are_reported():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("power_on", [True, False])
 @pytest.mark.parametrize("status", [{}, {"status-code": 620}])
-async def test_power_on_keeps_entities_on_during_startup_then_expires(
-    monkeypatch, status
+async def test_power_transition_keeps_entities_in_requested_state_then_expires(
+    monkeypatch, status, power_on
 ):
     device = PSNAccount(config())
-    device._control = SimpleNamespace(wake=AsyncMock())
-    device._local_status = {"status-code": 620}
+    device._control = SimpleNamespace(wake=AsyncMock(), standby=AsyncMock())
+    device._local_status = {"status-code": 620 if power_on else 200}
+    if not power_on and status:
+        status = {"status-code": 200}
     monkeypatch.setattr("psn.time.monotonic", lambda: 100)
-    await device.power_on()
+    await (device.power_on() if power_on else device.power_off())
     device._local_status = status
     device._publish()
     for entity, attributes, states in (
@@ -227,12 +257,52 @@ async def test_power_on_keeps_entities_on_during_startup_then_expires(
     ):
         attach(entity)
         await entity.sync_state()
-        assert entity.attributes[attributes.STATE] == states.ON
+        assert entity.attributes[attributes.STATE] == (
+            states.ON if power_on else states.OFF
+        )
     monkeypatch.setattr("psn.time.monotonic", lambda: 161)
     device._publish()
     assert device.psn_state == (
-        media_player.States.OFF if status else media_player.States.UNAVAILABLE
+        (media_player.States.OFF if power_on else media_player.States.ON)
+        if status
+        else media_player.States.UNAVAILABLE
     )
+
+
+@pytest.mark.asyncio
+async def test_shutdown_window_survives_intermittent_rest_mode_responses(monkeypatch):
+    device = PSNAccount(config())
+    device._control = SimpleNamespace(standby=AsyncMock(), wake=AsyncMock())
+    monkeypatch.setattr("psn.time.monotonic", lambda: 100)
+    await device.power_off()
+    for status in ({"status-code": 620}, {}, {"status-code": 620}, {}):
+        device._local_status = status
+        device._publish()
+        for entity, attributes, states in (
+            (
+                PSNMediaPlayer(device._device_config, device),
+                media_player.Attributes,
+                media_player.States,
+            ),
+            (
+                PSNRemote(device._device_config, device),
+                remote.Attributes,
+                remote.States,
+            ),
+            (
+                PSNSwitch(device._device_config, device),
+                switch.Attributes,
+                switch.States,
+            ),
+        ):
+            attach(entity)
+            await entity.sync_state()
+            assert entity.attributes[attributes.STATE] == states.OFF
+    monkeypatch.setattr("psn.time.monotonic", lambda: 161)
+    device._publish()
+    assert device.psn_state == media_player.States.UNAVAILABLE
+    await device.power_on()
+    assert device.psn_state == media_player.States.ON
 
 
 @pytest.mark.asyncio

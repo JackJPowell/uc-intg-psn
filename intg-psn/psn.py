@@ -26,11 +26,35 @@ from psnawp_api.core.psnawp_exceptions import (
     PSNAWPAuthenticationError,
     PSNAWPUnauthorizedError,
 )
+from pyremoteplay import RPDevice
 from ucapi import media_player
 from ucapi_framework.device import PollingDevice
 
 _LOG = logging.getLogger(__name__)
 AUTH_ERRORS = (PSNAWPAuthenticationError, PSNAWPUnauthorizedError)
+
+
+class DiagnosticRPDevice(RPDevice):
+    """Capture standby diagnostics before playdirector discards the session."""
+
+    async def standby(self, *args, **kwargs) -> bool:
+        started = time.monotonic()
+        result = None
+        try:
+            result = await super().standby(*args, **kwargs)
+            return result
+        finally:
+            session = self.session
+            _LOG.warning(
+                "Standby diagnostic: result=%r elapsed=%.2fs session_present=%s "
+                "is_stopped=%r is_ready=%r disconnect_reason=%r",
+                result,
+                time.monotonic() - started,
+                session is not None,
+                session.is_stopped if session else None,
+                session.is_ready if session else None,
+                session.disconnect_reason if session else None,
+            )
 
 
 class PSNAccount(PollingDevice):
@@ -59,6 +83,7 @@ class PSNAccount(PollingDevice):
         self._local_status: dict = {}
         self._local_reachable: bool | None = None
         self._power_on_until = 0.0
+        self._power_off_until = 0.0
         self._total_game_count: int | None = None
         self._installed_ids: list[str] = []
         self._installed_metadata: dict[str, dict] = {}
@@ -195,7 +220,10 @@ class PSNAccount(PollingDevice):
 
     async def establish_connection(self) -> None:
         if self.has_control:
-            self._control = ConsoleController(self._device_config.ps_device)
+            self._control = ConsoleController(
+                self._device_config.ps_device,
+                device_factory=lambda host: DiagnosticRPDevice(host, fetch_media=False),
+            )
         if self.has_psn:
             self._executor = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix="psn-account"
@@ -206,7 +234,7 @@ class PSNAccount(PollingDevice):
         await self.poll_device()
 
     def _publish(self) -> None:
-        """Publish console state, allowing a short startup window after wake."""
+        """Publish console state, allowing short power transition windows."""
         data = (
             self._presence_data
             if time.monotonic() - self._presence_time < 120
@@ -219,7 +247,9 @@ class PSNAccount(PollingDevice):
             if code == 200:
                 self._power_on_until = 0.0
             state = (
-                media_player.States.ON
+                media_player.States.OFF
+                if time.monotonic() < self._power_off_until
+                else media_player.States.ON
                 if code == 200 or time.monotonic() < self._power_on_until
                 else media_player.States.OFF
                 if code == 620
@@ -483,13 +513,20 @@ class PSNAccount(PollingDevice):
         self.push_update()
 
     async def power_on(self) -> None:
+        self._power_off_until = 0.0
         await self._control_command("wake")
         self._power_on_until = time.monotonic() + 60
         self._publish()
 
     async def power_off(self) -> None:
         self._power_on_until = 0.0
-        await self._control_command("standby")
+        try:
+            await self._control_command("standby")
+        except (ConsoleError, OSError, TimeoutError):
+            _LOG.exception("[%s] Standby failed", self.log_id)
+            raise
+        self._power_off_until = time.monotonic() + 60
+        self._publish()
 
     async def power_toggle(self) -> None:
         if self.psn_state in {
