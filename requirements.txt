@@ -1,7 +1,7 @@
 pyee>=12,<13
 ucapi==0.7.0
 PSNAWP==3.0.3
-pyrate_limiter>=4.0.2,<5.0.0
+pyrate_limiter>=4.5.1,<5.0.0
 ucapi-framework==1.9.8
 packaging>=25.0
 playdirector==0.4.0
