@@ -7,26 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## Unreleased
+## v3.0.0
 
-### Added
-- Maintained playdirector Remote Play engine, controller Remote entity, power switch and a profile selector.
-- Active title ID for automations, connection/API health, installed-title count and four trophy sensors.
-- Installed/recent game browsing, playtime details and confirmed Sony cloud game launching.
-- Account-ID-only local setup, additional paired profiles and verified legacy-credential migration.
+### New entities
 
-### Changed
-- Keep entity state in the existing coordinator/subscription pattern, with observed LAN power independent of PSN availability.
-- Serialize PSNAWP access, share cached public-library models, bound HTTP requests and validate authentication through real requests.
-- Share the 300-request/15-minute PSN budget across configured devices and setup; cache inventory metadata for one hour.
-- Avoid resetting the current-game trophy timer repeatedly while its refresh is pending.
-- Preserve PSNAWP's limiter lifecycle when enforcing the shared request budget to avoid a background cleanup-thread race.
-- Restore PSN sign-in/token links and separate the recommended setup from PSN-only and advanced local-only modes.
-- Retrieve account IDs automatically, discover consoles by default, retry discovery across network interfaces, and select cloud consoles by name.
-- Preserve the saved cloud console selection when refreshing PSN credentials.
-- Distinguish discovered consoles by IP, power state and running game; show reported models and console names in cloud selection.
-- Restore now-playing title, artwork and game platform for PS4 titles running on PS5; use matching cached metadata when LAN status omits artwork.
-- Require playdirector 0.4.0
+- **Remote controller**: navigate your PS4 or PS5 using directional controls, controller buttons and Home.
+- **Power switch**: wake your console or put it into rest mode.
+- **Profile selector**: choose between saved Remote Play pairings. Additional pairings can be registered through setup.
+- **Console and connection sensors**: Remote Play Connection Status, PSN API Health, Installed Titles and Active Title ID for automations.
+- **Trophy sensors**: Trophy Level, Earned Trophies, Platinum Trophies and Current Game Trophy Progress.
+
+### New features
+
+- **Installed games and apps**: browse the selected PS5's installed collection alongside your recently played games, with titles and artwork when available.
+- **Launch games from the Remote**: start a PS5 title directly from the media browser using your PSN account.
+- **Game details in the media browser**: open a game to view total playtime, play count, and first- and last-played dates.
+- **Guided setup**: choose PSN with console controls, PSN only, or advanced local-only control. PSN setup includes sign-in and token retrieval links and retrieves your account ID automatically.
+- **Multiple consoles**: add another PS5 using a saved PSN account, with separate controls and a game-launch selection for each console.
+- **Console discovery and selection**: search your network, identify consoles by name, IP address and power state, or enter an IP manually.
 
 ---
 
