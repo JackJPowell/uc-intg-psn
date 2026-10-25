@@ -8,6 +8,7 @@ import asyncio
 import copy
 import logging
 from dataclasses import replace
+from ipaddress import ip_address
 from typing import Any
 
 from api import PlayStationNetwork
@@ -25,6 +26,7 @@ _LOG = logging.getLogger(__name__)
 _MANUAL = "__manual__"
 _RESCAN = "__rescan__"
 _SKIP = "__skip__"
+_NEW_ACCOUNT = "__new_account__"
 
 
 def _enabled(value: Any) -> bool:
@@ -94,8 +96,23 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         self._add_profile = False
         self._stage = ""
 
+    def _saved_configs(self) -> list[PSNConfig]:
+        manager = getattr(self, "config", None)
+        return list(manager.all()) if callable(getattr(manager, "all", None)) else []
+
+    def _saved_accounts(self) -> list[PSNConfig]:
+        accounts = {}
+        for config in self._saved_configs():
+            if config.npsso:
+                key = config.psn_account_id or config.identifier
+                accounts.setdefault(key, config)
+        return list(accounts.values())
+
     def get_manual_entry_form(self) -> RequestUserInput:
         existing = self.selected_config_entry
+        self._selected_ip = ""
+        self._stage = ""
+        self._add_profile = False
         self._setup_mode = (
             "psn_console" if not existing or existing.ps_device else "psn_only"
         )
@@ -105,7 +122,8 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             {"en": "Set up PlayStation"},
             [
                 _message(
-                    "Choose what you want to connect. PSN setup retrieves your account details automatically."
+                    "Choose what you want to connect. To add another console, choose PSN and console controls. "
+                    "You can reuse a saved PSN account; each console gets its own controls and game-launch selection."
                 ),
                 {
                     "id": "setup_mode",
@@ -169,6 +187,50 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                 ),
                 _text("npsso", "NPSSO token or JSON response"),
             ]
+        accounts = self._saved_accounts() if not existing and not local_only else []
+        if accounts:
+            fields.insert(
+                0,
+                {
+                    "id": "psn_account",
+                    "label": {"en": "PSN account"},
+                    "field": {
+                        "dropdown": {
+                            "value": accounts[0].identifier,
+                            "items": [
+                                {
+                                    "id": account.identifier,
+                                    "label": {
+                                        "en": f"Use PSN account from {account.name}"
+                                    },
+                                }
+                                for account in accounts
+                            ]
+                            + [
+                                {
+                                    "id": _NEW_ACCOUNT,
+                                    "label": {"en": "Use another PSN account"},
+                                }
+                            ],
+                        }
+                    },
+                },
+            )
+            fields.insert(
+                1,
+                {
+                    "id": "saved_account_info",
+                    "label": {"en": "Saved PSN account"},
+                    "field": {
+                        "label": {
+                            "value": {
+                                "en": "Leave the token blank to reuse the selected account. To connect a different account, "
+                                "select Use another PSN account and retrieve its token using the links below."
+                            }
+                        }
+                    },
+                },
+            )
         if error:
             fields.append(
                 {
@@ -180,18 +242,28 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         fields.append(
             _text("name", "Display name", existing.name if existing else "PlayStation")
         )
-        if existing:
+        if (
+            existing
+            and getattr(self, "_setup_mode", "psn_console") == "psn_console"
+            and existing.ps_device.get("device_type") == "PS5"
+            and existing.launch_device_id
+        ):
             fields.append(
                 _checkbox(
-                    "add_control", "Enable console controls", bool(existing.ps_device)
+                    "change_cloud_console", "Change console used for game launching"
                 )
             )
-        if existing and existing.ps_device:
+        if (
+            existing
+            and existing.ps_device
+            and getattr(self, "_setup_mode", "psn_console") != "psn_only"
+        ):
             fields.extend(
                 [
                     _checkbox("re_pair", "Pair this console again"),
                     _checkbox(
-                        "add_profile", "Register an additional controller profile"
+                        "add_profile",
+                        "Register another controller pairing for this console",
                     ),
                     _text(
                         "profile_name",
@@ -213,15 +285,39 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             return self._form()
         mode = getattr(self, "_setup_mode", "psn_console")
         config = copy.deepcopy(existing) if existing else PSNConfig("", "PlayStation")
+        if not existing and mode != "local_only":
+            accounts = self._saved_accounts()
+            choice = input_values.get(
+                "psn_account", accounts[0].identifier if accounts else _NEW_ACCOUNT
+            )
+            source = next(
+                (account for account in accounts if account.identifier == choice), None
+            )
+            if choice != _NEW_ACCOUNT and source is None:
+                return self._form(
+                    "Choose a saved PSN account or Use another PSN account."
+                )
+            if source:
+                # Reuse account credentials, never the other console's pairing or DUID.
+                config.npsso, config.psn_account_id = (
+                    source.npsso,
+                    source.psn_account_id,
+                )
         control_requested = _enabled(
             input_values.get("add_control", mode != "psn_only")
         )
+        if _enabled(input_values.get("change_cloud_console")):
+            config.launch_device_id = ""
         self._cloud_consoles = []
         token_input = str(input_values.get("npsso") or "").strip()
         try:
             token = parse_npsso_token(token_input) if token_input else config.npsso
         except (PSNAWPInvalidTokenError, TypeError):
             return self._form("The NPSSO token JSON is malformed")
+        if not isinstance(token, str):
+            return self._form(
+                "The NPSSO token must be text or a JSON response containing a text npsso value"
+            )
         if mode == "local_only" or _enabled(input_values.get("disable_psn")):
             token = ""
         if token_input and not token and not _enabled(input_values.get("disable_psn")):
@@ -243,6 +339,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             .get("id", "")
         ).strip()
         display_name = str(input_values.get("name") or config.name).strip()
+        self._use_console_name = not existing and display_name == "PlayStation"
         if token:
 
             def validate():
@@ -392,12 +489,27 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             and not config.launch_device_id
             and rows
         ):
-            if len(rows) == 1:
+            assigned = {
+                saved.launch_device_id: saved.name
+                for saved in self._saved_configs()
+                if saved.identifier != config.identifier and saved.launch_device_id
+            }
+            if len(rows) == 1 and rows[0]["duid"] not in assigned:
                 return replace(config, launch_device_id=rows[0]["duid"])
             self._pending_device_config = config
             self._stage = "cloud_select"
             options = [
-                {"id": row["duid"], "label": {"en": _cloud_console_label(row)}}
+                {
+                    "id": row["duid"],
+                    "label": {
+                        "en": _cloud_console_label(row)
+                        + (
+                            f" (configured for {assigned[row['duid']]})"
+                            if row["duid"] in assigned
+                            else ""
+                        )
+                    },
+                }
                 for row in rows
             ]
             options.append(
@@ -407,7 +519,8 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                 {"en": "Choose the console for game launching"},
                 [
                     _message(
-                        "Your PSN account has multiple consoles. Choose the one you just paired. "
+                        "Choose the cloud console matching this local console. "
+                        "Consoles already selected for another device are marked. If yours is missing, skip this step. "
                         "If the names are identical, you can give each PS5 a distinct name under "
                         "Settings → System → System Software → Console Information."
                     ),
@@ -425,13 +538,19 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
     def _pin_form(self, error: str = "") -> RequestUserInput:
         fields = [
             _message(
-                error
-                or "PS5: Settings → System → Remote Play → Link Device. "
+                "PS5: Settings → System → Remote Play → Link Device. "
                 "PS4: Settings → Remote Play Connection Settings → Add Device. Enter the eight-digit PIN."
             )
         ]
-        if not self._selected_ip:
-            fields.append(_text("manual_ip", "Console IP address"))
+        if error:
+            fields.append(
+                {
+                    "id": "error",
+                    "label": {"en": "Please check"},
+                    "field": {"label": {"value": {"en": error}}},
+                }
+            )
+        fields.append(_text("manual_ip", "Console IP address", self._selected_ip))
         fields.append(_text("pin", "Remote Play PIN"))
         return RequestUserInput({"en": "Pair PlayStation"}, fields)
 
@@ -453,15 +572,26 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             return self._pin_form()
         if self._stage != "pin":
             return SetupError(error_type=IntegrationSetupError.OTHER)
-        host = self._selected_ip or str(values.get("manual_ip") or "").strip()
+        host = str(values.get("manual_ip", self._selected_ip) or "").strip()
+        self._selected_ip = host
         pin = str(values.get("pin") or "").replace(" ", "").replace("-", "")
         config = self._pending_device_config
+        try:
+            ip_address(host)
+        except ValueError:
+            return self._pin_form("Enter a valid console IP address.")
+        if len(pin) != 8 or not pin.isascii() or not pin.isdecimal():
+            return self._pin_form(
+                "Enter the eight-digit Remote Play PIN shown on your console."
+            )
         try:
             credentials = await pair_console(
                 host, config.psn_account_id, pin, self._profile_name
             )
-            old_host = config.ps_device.get("host_id") or config.ps_device.get(
-                "device_id"
+            old_host = (
+                config.console_host_id
+                or config.ps_device.get("host_id")
+                or config.ps_device.get("device_id")
             )
             if (
                 old_host
@@ -481,6 +611,29 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             return self._pin_form(
                 "Pairing failed. Check the console IP and generate a fresh eight-digit PIN."
             )
+        host_id = credentials["host_id"].replace(":", "").casefold()
+        for saved in self._saved_configs():
+            if saved.identifier == config.identifier:
+                continue
+            saved_host = (
+                saved.console_host_id
+                or saved.ps_device.get("host_id")
+                or saved.ps_device.get("device_id")
+                or ""
+            )
+            if saved_host and str(saved_host).replace(":", "").casefold() == host_id:
+                return self._pin_form(
+                    f"This console is already configured as {saved.name}. Enter a different console's IP address, "
+                    "or update the existing device to change its pairing."
+                )
+        if getattr(self, "_use_console_name", False):
+            name = credentials.get("host_name") or "PlayStation"
+            if any(
+                saved.name.casefold() == name.casefold()
+                for saved in self._saved_configs()
+            ):
+                name = f"{name} ({host})"
+            config = replace(config, name=name)
         identifier = (
             config.identifier
             or f"console_{credentials['host_id'].replace(':', '').lower()}"
