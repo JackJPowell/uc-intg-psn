@@ -550,6 +550,143 @@ async def test_account_requests_are_serialized_on_one_worker(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_connect_starts_cloud_while_lan_probe_is_blocked(monkeypatch):
+    device = PSNAccount(config())
+    lan_started, cloud_started, release = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+
+    async def status():
+        lan_started.set()
+        await release.wait()
+        return {"status-code": 200}
+
+    controller = SimpleNamespace(
+        status=AsyncMock(side_effect=status),
+        close=AsyncMock(),
+        credentials=device.device_config.ps_device,
+        connected=False,
+    )
+    monkeypatch.setattr("psn.ConsoleController", Mock(return_value=controller))
+    client = SimpleNamespace(close=Mock())
+    constructor = Mock(return_value=client)
+    monkeypatch.setattr("psn.PlayStationNetwork", constructor)
+    device._refresh_presence = AsyncMock(side_effect=cloud_started.set)
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(*(device.connect() for _ in range(3))), 2
+        )
+        assert all(results)
+        await asyncio.wait_for(lan_started.wait(), 2)
+        await asyncio.wait_for(cloud_started.wait(), 2)
+        assert device.is_connected
+        constructor.assert_called_once()
+        controller.status.assert_awaited_once()
+        # Another poll must share the in-flight LAN probe and presence deadline.
+        await device.poll_device()
+        controller.status.assert_awaited_once()
+        device._refresh_presence.assert_awaited_once()
+    finally:
+        await device.disconnect()
+    controller.close.assert_awaited_once()
+    assert not device._background_tasks
+
+
+@pytest.mark.asyncio
+async def test_disconnect_waits_for_inflight_connect_and_stops_polling():
+    device = PSNAccount(PSNConfig("local", "Local"))
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def establish():
+        started.set()
+        await release.wait()
+
+    device.establish_connection = establish
+    device.poll_device = AsyncMock()
+    connection = asyncio.create_task(device.connect())
+    await started.wait()
+    disconnection = asyncio.create_task(device.disconnect())
+    await asyncio.sleep(0)
+    assert not disconnection.done()
+    release.set()
+    await asyncio.wait_for(asyncio.gather(connection, disconnection), 2)
+    assert not device.is_connected
+
+
+@pytest.mark.asyncio
+async def test_reconnect_resets_authentication_and_refresh_deadlines(monkeypatch):
+    device = PSNAccount(PSNConfig("account", "PSN", "secret"))
+    device.psn_authenticated = True
+    device._next_presence = device._next_trophies = device._next_progress = (
+        device._next_inventory
+    ) = time.monotonic() + 1800
+    monkeypatch.setattr(
+        "psn.PlayStationNetwork", lambda *args: SimpleNamespace(close=Mock())
+    )
+    try:
+        await device.establish_connection()
+        assert device.psn_authenticated is None
+        assert (
+            device._next_presence
+            == device._next_trophies
+            == device._next_progress
+            == device._next_inventory
+            == 0
+        )
+    finally:
+        await device.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_authentication_schedules_metrics_without_waiting_for_poll():
+    device = PSNAccount(config())
+    device._psn = SimpleNamespace(get_user=Mock(), get_data=Mock())
+    device._call = AsyncMock(
+        side_effect=[
+            SimpleNamespace(account_id="123"),
+            PlayStationNetworkData({}, "Player", "123", False, {}, {}, ["PS5"]),
+        ]
+    )
+    device._schedule = Mock()
+    await device._refresh_presence()
+    assert [call.args[0] for call in device._schedule.call_args_list] == [
+        "trophies",
+        "inventory",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_empty_inventory_publishes_once(monkeypatch):
+    device = PSNAccount(config())
+    device._psn = SimpleNamespace(psn=SimpleNamespace(authenticator=object()))
+    monkeypatch.setattr(
+        "psn.SonyConsoleService", lambda _: SimpleNamespace(inventory=Mock())
+    )
+    device._call = AsyncMock(
+        return_value=SimpleNamespace(duid="console", name="PS5", titles=[])
+    )
+    device.push_update = Mock()
+    await device._refresh_inventory()
+    device.push_update.assert_called_once()
+    assert device.installed_count == 0
+
+
+@pytest.mark.asyncio
+async def test_profile_selector_skips_unchanged_publications():
+    device = PSNAccount(config())
+    device._control = SimpleNamespace(profiles=["one"])
+    device._device_config.ps_device["user"] = "one"
+    entity = attach(PSNSelect(device.device_config, device))
+    store = entity._api.configured_entities
+    store.update_attributes = Mock(side_effect=store.update_attributes)
+    await entity.sync_state()
+    await entity.sync_state()
+    store.update_attributes.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_local_only_setup_discovers_then_pairs_without_cloud(monkeypatch):
     flow = object.__new__(PSNSetupFlow)
     flow._selected_config_id = None

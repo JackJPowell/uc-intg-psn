@@ -39,7 +39,6 @@ class PSNSelect(SelectEntity):
                 select.Attributes.CURRENT_OPTION: current if current in options else "",
                 select.Attributes.OPTIONS: options,
             },
-            force=True,
         )
 
     async def command(self, cmd_id: str, params=None, *, websocket=None) -> StatusCodes:

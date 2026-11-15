@@ -216,9 +216,23 @@ class PSNAccount(PollingDevice):
 
     async def connect(self) -> bool:
         async with self._connect_lock:
-            return True if self.is_connected else await super().connect()
+            if self.is_connected:
+                return True
+            try:
+                connected = await super().connect()
+            except asyncio.CancelledError:
+                await self._disconnect()
+                raise
+            if not connected:
+                await self._disconnect()
+            return connected
 
     async def establish_connection(self) -> None:
+        # A new client must authenticate and refresh even after a short sleep.
+        self.psn_authenticated = None
+        self._next_presence = self._next_trophies = self._next_progress = (
+            self._next_inventory
+        ) = 0.0
         if self.has_control:
             self._control = ConsoleController(
                 self._device_config.ps_device,
@@ -231,7 +245,9 @@ class PSNAccount(PollingDevice):
             self._psn = await self._call(
                 PlayStationNetwork, self._device_config.npsso, self._loop
             )
-        await self.poll_device()
+        # PollingDevice starts the first poll immediately. Do not probe the LAN
+        # here: discovery must not hold up CONNECTED or cloud requests.
+        self._publish()
 
     def _publish(self) -> None:
         """Publish console state, allowing short power transition windows."""
@@ -316,6 +332,16 @@ class PSNAccount(PollingDevice):
 
     async def poll_device(self) -> None:
         if self._control:
+            self._schedule("local_status", self._refresh_local_status)
+        now = time.monotonic()
+        if self._psn and now >= self._next_presence:
+            self._next_presence = now + 45
+            self._schedule("presence", self._refresh_presence)
+        self._schedule_account_refreshes()
+
+    async def _refresh_local_status(self) -> None:
+        started = time.monotonic()
+        if self._control:
             try:
                 self._local_status = await self._control.status()
                 self._local_reachable = bool(self._local_status)
@@ -332,10 +358,17 @@ class PSNAccount(PollingDevice):
                 self.console_error = str(exc)
                 self._local_status = {}
                 self._local_reachable = False
+        _LOG.debug(
+            "[%s] LAN status refreshed in %.2fs",
+            self.log_id,
+            time.monotonic() - started,
+        )
+        self._publish()
+        self._schedule_account_refreshes()
+
+    def _schedule_account_refreshes(self) -> None:
+        """Start due account work as soon as authentication or title data arrives."""
         now = time.monotonic()
-        if self._psn and now >= self._next_presence:
-            self._next_presence = now + 45
-            self._schedule("presence", self._refresh_presence)
         if self._psn and self.psn_authenticated:
             if now >= self._next_trophies:
                 self._next_trophies = now + 1800
@@ -346,7 +379,6 @@ class PSNAccount(PollingDevice):
             if self.can_launch_games and now >= self._next_inventory:
                 self._next_inventory = now + 900
                 self._schedule("inventory", self._refresh_inventory)
-        self._publish()
 
     async def _refresh_presence(self) -> None:
         try:
@@ -361,6 +393,7 @@ class PSNAccount(PollingDevice):
                     )
                 self.psn_authenticated = True
                 self.push_update()
+                self._schedule_account_refreshes()
             data = await self._call(self._psn.get_data)
             expected = self._device_config.psn_account_id
             if expected and account_id_to_base64(expected) != account_id_to_base64(
@@ -384,6 +417,7 @@ class PSNAccount(PollingDevice):
                 "[%s] PSN presence unavailable: %s", self.log_id, type(exc).__name__
             )
         self._publish()
+        self._schedule_account_refreshes()
 
     async def _refresh_trophies(self) -> None:
         try:
@@ -422,7 +456,6 @@ class PSNAccount(PollingDevice):
                 if inventory.titles is not None
                 else "Sony did not return installed-title inventory"
             )
-            self.push_update()
         except Exception as exc:  # noqa: BLE001 - isolate upstream failures at the service boundary
             self.installed_inventory_available = False
             self.installed_count = None
@@ -430,6 +463,9 @@ class PSNAccount(PollingDevice):
                 str(exc) if isinstance(exc, CloudError) else "PSN inventory unavailable"
             )
         if self.installed_inventory_available and self._installed_ids:
+            # Inventory and metadata arrive in separate requests; expose counts
+            # immediately without publishing twice when no metadata is needed.
+            self.push_update()
             try:
                 metadata = await self._call(
                     self._psn.get_title_metadata, self._installed_ids
@@ -551,6 +587,11 @@ class PSNAccount(PollingDevice):
         await self._control_command("reconnect")
 
     async def disconnect(self) -> None:
+        async with self._connect_lock:
+            await self._disconnect()
+
+    async def _disconnect(self) -> None:
+        """Release resources while holding the connection lifecycle lock."""
         await super().disconnect()
         for task in self._background_tasks.values():
             task.cancel()
