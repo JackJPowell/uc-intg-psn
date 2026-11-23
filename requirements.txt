@@ -1,4 +1,4 @@
-pyee>=12,<13
+pyee>=15.0.0,<16
 ucapi==0.7.0
 PSNAWP==3.0.3
 pyrate_limiter>=4.0.2,<5.0.0
