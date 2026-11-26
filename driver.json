@@ -1,6 +1,6 @@
 {
   "driver_id": "psn_driver",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "min_core_api": "0.20.0",
   "name": {
     "en": "PlayStation Network"
@@ -39,5 +39,5 @@
       }
     ]
   },
-  "release_date": "2026-11-15"
+  "release_date": "2026-11-26"
 }

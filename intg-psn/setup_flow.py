@@ -19,7 +19,13 @@ from playdirector import account_id_to_base64, pair_console, scan
 from psnawp_api.core.psnawp_exceptions import PSNAWPInvalidTokenError
 from psnawp_api.utils.misc import parse_npsso_token
 from pyremoteplay.ddp import async_search
-from ucapi import IntegrationSetupError, RequestUserInput, SetupError
+from ucapi import (
+    AbortDriverSetup,
+    DriverSetupRequest,
+    IntegrationSetupError,
+    RequestUserInput,
+    SetupError,
+)
 from ucapi_framework import BaseSetupFlow, MigrationData
 
 _LOG = logging.getLogger(__name__)
@@ -96,6 +102,22 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         self._add_profile = False
         self._stage = ""
 
+    async def handle_driver_setup(self, msg):
+        # The framework retains pending configuration when setup is aborted or
+        # restarted. It must not route a new reconfigure session to an old PIN page.
+        if isinstance(msg, (DriverSetupRequest, AbortDriverSetup)):
+            self._pending_device_config = None
+            self._selected_config_id = None
+            self._pre_discovery_data = {}
+            self._stage = ""
+        return await super().handle_driver_setup(msg)
+
+    async def _handle_configuration_mode(self, msg):
+        if msg.input_values.get("action") in {"add", "update"}:
+            self._add_mode = msg.input_values["action"] == "add"
+            self._selected_config_id = None
+        return await super()._handle_configuration_mode(msg)
+
     def _saved_configs(self) -> list[PSNConfig]:
         manager = getattr(self, "config", None)
         return list(manager.all()) if callable(getattr(manager, "all", None)) else []
@@ -150,7 +172,17 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                                         "en": "Console controls without PSN (advanced)"
                                     },
                                 },
-                            ],
+                            ]
+                            + (
+                                [
+                                    {
+                                        "id": "token_only",
+                                        "label": {"en": "Update NPSSO Token Only"},
+                                    }
+                                ]
+                                if existing
+                                else []
+                            ),
                         }
                     },
                 },
@@ -159,6 +191,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
 
     def _form(self, error: str = "") -> RequestUserInput:
         existing = self.selected_config_entry
+        token_only = getattr(self, "_setup_mode", "psn_console") == "token_only"
         local_only = getattr(self, "_setup_mode", "psn_console") == "local_only"
         if local_only:
             fields = [
@@ -181,7 +214,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                     "\n\n3. Paste the token or the complete JSON response below. Your account ID is retrieved automatically."
                     + (
                         " Leave this blank to keep your saved PSN credentials."
-                        if existing and existing.npsso
+                        if existing and existing.npsso and not token_only
                         else ""
                     )
                 ),
@@ -239,6 +272,8 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                     "field": {"label": {"value": {"en": error}}},
                 }
             )
+        if token_only:
+            return RequestUserInput({"en": "Update NPSSO Token Only"}, fields)
         fields.append(
             _text("name", "Display name", existing.name if existing else "PlayStation")
         )
@@ -279,11 +314,14 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
         existing = self.selected_config_entry
         if "setup_mode" in input_values:
             mode = input_values["setup_mode"]
-            if mode not in {"psn_console", "psn_only", "local_only"}:
+            if mode not in {"psn_console", "psn_only", "local_only", "token_only"}:
+                return self.get_manual_entry_form()
+            if mode == "token_only" and not existing:
                 return self.get_manual_entry_form()
             self._setup_mode = mode
             return self._form()
         mode = getattr(self, "_setup_mode", "psn_console")
+        token_only = mode == "token_only"
         config = copy.deepcopy(existing) if existing else PSNConfig("", "PlayStation")
         if not existing and mode != "local_only":
             accounts = self._saved_accounts()
@@ -303,13 +341,15 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                     source.npsso,
                     source.psn_account_id,
                 )
-        control_requested = _enabled(
+        control_requested = not token_only and _enabled(
             input_values.get("add_control", mode != "psn_only")
         )
         if _enabled(input_values.get("change_cloud_console")):
             config.launch_device_id = ""
         self._cloud_consoles = []
         token_input = str(input_values.get("npsso") or "").strip()
+        if token_only and not token_input:
+            return self._form("Paste the new NPSSO token or JSON response.")
         try:
             token = parse_npsso_token(token_input) if token_input else config.npsso
         except (PSNAWPInvalidTokenError, TypeError):
@@ -318,7 +358,9 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             return self._form(
                 "The NPSSO token must be text or a JSON response containing a text npsso value"
             )
-        if mode == "local_only" or _enabled(input_values.get("disable_psn")):
+        if not token_only and (
+            mode == "local_only" or _enabled(input_values.get("disable_psn"))
+        ):
             token = ""
         if token_input and not token and not _enabled(input_values.get("disable_psn")):
             return self._form("The NPSSO token is invalid")
@@ -381,6 +423,8 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
                 return self._form(
                     "Could not sign in to PSN. Sign in using the link above and retrieve a fresh NPSSO token."
                 )
+        if token_only:
+            return replace(existing, npsso=token)
         try:
             normalized = account_id_to_base64(account_id)
         except ValueError:
@@ -425,7 +469,7 @@ class PSNSetupFlow(BaseSetupFlow[PSNConfig]):
             )
         self._pending_device_config = config
         if config.ps_device:
-            self._selected_ip = config.ps_device["device_ip"]
+            self._selected_ip = config.ps_device.get("device_ip", "")
             self._stage = "pin"
             return self._pin_form()
         return await self._discover_consoles()

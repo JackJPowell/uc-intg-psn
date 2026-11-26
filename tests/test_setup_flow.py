@@ -10,7 +10,13 @@ from const import PSNConfig
 from playdirector import ConsoleError
 from psnawp_api.core.psnawp_exceptions import PSNAWPInvalidTokenError
 from setup_flow import PSNSetupFlow
-from ucapi import RequestUserInput, SetupComplete
+from ucapi import (
+    AbortDriverSetup,
+    DriverSetupRequest,
+    IntegrationSetupError,
+    RequestUserInput,
+    SetupComplete,
+)
 from ucapi_framework.setup import SetupSteps
 
 TOKEN = "a" * 64
@@ -543,3 +549,120 @@ async def test_only_cloud_console_is_saved_without_an_extra_selection_page(monke
     result = await session.submit(pin="12345678")
     assert isinstance(result, SetupComplete)
     assert session.entries["console_112233445566"].launch_device_id == "only-cloud"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("paired", [False, True])
+@pytest.mark.parametrize("json_token", [False, True])
+async def test_token_only_updates_exactly_the_token(monkeypatch, paired, json_token):
+    first = saved_console() if paired else PSNConfig("account", "Player", TOKEN)
+    original = copy.deepcopy(first)
+    other = PSNConfig("other", "Other account", TOKEN, psn_account_id="456")
+    session = SetupSession(monkeypatch, [first, other], selected=first.identifier)
+    form = await session.start("token_only")
+    assert {row["id"] for row in form.settings} == {"information", "npsso"}
+    result = await session.submit(
+        npsso='{"npsso": "' + NEW_TOKEN + '"}' if json_token else NEW_TOKEN
+    )
+    assert isinstance(result, SetupComplete)
+    expected = copy.deepcopy(original)
+    expected.npsso = NEW_TOKEN
+    assert session.entries[first.identifier] == expected
+    assert first == original
+    assert session.entries[other.identifier] is other
+    session.scan.assert_not_awaited()
+    session.pair.assert_not_awaited()
+    session.consoles.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_token_only_requires_fresh_valid_credentials_for_the_saved_account(
+    monkeypatch,
+):
+    first = saved_console()
+    original = copy.deepcopy(first)
+    session = SetupSession(monkeypatch, [first], selected=first.identifier)
+    await session.start("token_only")
+    for token in ["", "{broken", '{"npsso": 123}']:
+        assert_page(await session.submit(npsso=token), "npsso", "error")
+        session.assert_unsaved()
+    session.api.get_user.side_effect = RuntimeError("expired token")
+    assert_page(await session.submit(npsso=NEW_TOKEN), "npsso", "error")
+    session.api.get_user.side_effect = None
+    session.api.get_user.return_value.account_id = "456"
+    assert_page(await session.submit(npsso=NEW_TOKEN), "npsso", "error")
+    session.assert_unsaved()
+    assert first == original
+    session.api.get_user.return_value.account_id = "123"
+    assert isinstance(await session.submit(npsso=NEW_TOKEN), SetupComplete)
+
+
+@pytest.mark.asyncio
+async def test_token_only_is_offered_only_when_updating_a_saved_config(monkeypatch):
+    first = saved_console()
+    session = SetupSession(monkeypatch, [first])
+    for selected in [None, first.identifier]:
+        session.flow._selected_config_id = selected
+        page = session.flow.get_manual_entry_form()
+        items = next(row for row in page.settings if row["id"] == "setup_mode")[
+            "field"
+        ]["dropdown"]["items"]
+        assert ("Update NPSSO Token Only" in str(items)) == bool(selected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("abort", [False, True])
+@pytest.mark.parametrize("re_pair", [False, True])
+async def test_reconfigure_restarts_an_unfinished_pairing_flow(
+    monkeypatch, abort, re_pair
+):
+    first = saved_console()
+    original = copy.deepcopy(first)
+    session = SetupSession(monkeypatch, [first], selected=first.identifier)
+    await session.start("psn_console")
+    assert_page(await session.submit(re_pair=True), "pin")
+    session.assert_unsaved()
+    if abort:
+        await session.flow.handle_driver_setup(
+            AbortDriverSetup(IntegrationSetupError.OTHER)
+        )
+    result = await session.flow.handle_driver_setup(DriverSetupRequest(True, {}))
+    assert_page(result, "action", "choice")
+    result = await session.submit(action="update", choice=first.identifier)
+    assert_page(result, "setup_mode")
+    await session.submit(setup_mode="psn_console")
+    result = await session.submit(npsso=NEW_TOKEN, re_pair=re_pair)
+    if re_pair:
+        assert_page(result, "pin")
+        session.pair.return_value = pairing("aabbccddeeff")
+        result = await session.submit(pin="12345678")
+    assert isinstance(result, SetupComplete)
+    updated = session.entries[first.identifier]
+    assert updated.npsso == NEW_TOKEN
+    assert updated.launch_device_id == original.launch_device_id
+    assert first == original
+
+
+@pytest.mark.asyncio
+async def test_updating_after_an_add_does_not_reject_the_existing_device(monkeypatch):
+    first = saved_console()
+    session = SetupSession(monkeypatch, [first])
+    session.flow._setup_step = SetupSteps.CONFIGURATION_MODE
+    await session.submit(action="add", choice=first.identifier)
+    session.flow._setup_step = SetupSteps.CONFIGURATION_MODE
+    await session.submit(action="update", choice=first.identifier)
+    await session.submit(setup_mode="psn_console")
+    assert isinstance(await session.submit(npsso=NEW_TOKEN), SetupComplete)
+
+
+@pytest.mark.asyncio
+async def test_repair_with_missing_saved_ip_asks_for_ip_and_retains_psn(monkeypatch):
+    first = saved_console()
+    first.ps_device.pop("device_ip")
+    session = SetupSession(monkeypatch, [first], selected=first.identifier)
+    await session.start("psn_console")
+    assert_page(await session.submit(re_pair=True), "manual_ip", "pin")
+    session.pair.return_value = pairing("aabbccddeeff")
+    result = await session.submit(manual_ip=HOST, pin="12345678")
+    assert isinstance(result, SetupComplete)
+    assert session.entries[first.identifier].npsso == TOKEN

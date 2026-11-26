@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v3.0.3
+
+### New features
+
+- Added **Update NPSSO Token Only** during reconfiguration to validate and replace the token while preserving all other saved settings.
+
+### Fixes
+
+- Cleared unfinished setup state when restarting or aborting setup so reconfiguration does not resume an old pairing step.
+- Corrected switching from adding a device to updating an existing device so it is not rejected as a duplicate.
+- Allowed Remote Play pairing again when the saved console IP address is missing, prompting for the address while preserving PSN credentials.
+
+---
+
 ## v3.0.2
 
 ### Fixes
