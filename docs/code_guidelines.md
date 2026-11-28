@@ -11,18 +11,26 @@
 Install all code linting tools:
 
 ```shell
-pip3 install -r test-requirements.txt
+uv sync
 ```
 
 ### Verify
 
-The following tests are run as GitHub action for each push on the main branch and for pull requests.
+CI runs Ruff lint, formatting checks, and pytest on relevant pushes and pull requests.
 They can also be run anytime on a local developer machine:
 ```shell
-python -m pylint intg-psn
-python -m flake8 intg-psn --count --show-source --statistics
-python -m isort intg-psn/. --check --verbose 
-python -m black intg-psn --check --verbose --line-length 120
+uv run ruff check intg-psn
+uv run ruff format intg-psn --check
+uv run pytest tests
+```
+
+The existing additional development tools are also installed:
+
+```shell
+uv run pylint intg-psn
+uv run flake8 intg-psn --count --show-source --statistics
+uv run isort intg-psn/. --check --verbose
+uv run black intg-psn --check --verbose --line-length 120
 ```
 
 Linting integration in PyCharm/IntelliJ IDEA:
@@ -31,7 +39,7 @@ Linting integration in PyCharm/IntelliJ IDEA:
 
 ### Format Code
 ```shell
-python -m black intg-psn --line-length 120
+uv run black intg-psn --line-length 120
 ```
 
 PyCharm/IntelliJ IDEA integration:
@@ -44,5 +52,5 @@ PyCharm/IntelliJ IDEA integration:
 ### Sort Imports
 
 ```shell
-python -m isort intg-psn/.
+uv run isort intg-psn/.
 ```

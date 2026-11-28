@@ -1,33 +1,37 @@
-FROM python:3.11-slim-bookworm AS wheels
+FROM python:3.14-slim-bookworm AS dependencies
+COPY --from=ghcr.io/astral-sh/uv:0.13.10 /uv /uvx /usr/local/bin/
 
+# netifaces is distributed as source; keep its compiler out of the runtime image.
 RUN apt-get update -o APT::Update::Error-Mode=any \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
-WORKDIR /build
-COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
-RUN pip download --no-deps --no-binary=:all: --dest /sources playdirector==0.4.0
 
-FROM python:3.11-slim-bookworm
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
+COPY . .
+RUN uv sync --no-dev --no-install-project \
+    && python tools/package_sources.py /app
 
-COPY ./requirements.txt requirements.txt
-COPY --from=wheels /wheels /wheels
-COPY --from=wheels /sources /sources
-RUN pip3 install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt
+FROM python:3.14-slim-bookworm
+COPY --from=ghcr.io/astral-sh/uv:0.13.10 /uv /uvx /usr/local/bin/
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+COPY --from=dependencies /opt/venv /opt/venv
+COPY --from=dependencies /app /app
 RUN mkdir /config
 
-ADD . .
-RUN python tools/package_sources.py /app --library-source /sources/playdirector-0.4.0.tar.gz
-
-ENV UC_DISABLE_MDNS_PUBLISH="false"
-ENV UC_MDNS_LOCAL_HOSTNAME=""
-
-ENV UC_INTEGRATION_INTERFACE="0.0.0.0"
-ENV UC_INTEGRATION_HTTP_PORT="9090"
-
-ENV UC_CONFIG_HOME="/config"
+ENV UC_DISABLE_MDNS_PUBLISH="false" \
+    UC_MDNS_LOCAL_HOSTNAME="" \
+    UC_INTEGRATION_INTERFACE="0.0.0.0" \
+    UC_INTEGRATION_HTTP_PORT="9090" \
+    UC_CONFIG_HOME="/config"
 LABEL org.opencontainers.image.source="https://github.com/jackjpowell/uc-intg-psn"
 
 CMD ["python3", "-u", "intg-psn/driver.py"]

@@ -1,4 +1,4 @@
-# Triggered by version tag creation to build a distribution binary, Docker image, and create a release draft
+# Build a distribution binary and Docker image, then publish the release.
 name: "Build & Release"
 
 "on":
@@ -14,13 +14,16 @@ name: "Build & Release"
 
 env:
   INTG_NAME: psn
-  # Python version to use in the builder image. See https://hub.docker.com/r/unfoldedcircle/r2-pyinstaller for possible versions.
-  PYTHON_VER: 3.11.13-0.7.0
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   build:
     name: Build Release
-    runs-on: ubuntu-24.04
+    # glibc 2.35 build baseline for devices with glibc 2.38.
+    runs-on: ubuntu-22.04-arm
     #Save version to env output variable to be able to use it in the following release job as a tag
     outputs:
       version: ${{ steps.get-version-and-id.outputs.VERSION }}
@@ -28,77 +31,90 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
         with:
-          # History of 200 should be more than enough to calculate commit count since last release tag
-          fetch-depth: 200
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          version: '0.13.10'
+          enable-cache: true
 
       - name: Get version and id
-        #Id needed for env output variable
         id: get-version-and-id
-        run: |
-          # Use manual input version when triggered via workflow_dispatch, otherwise extract from git tag
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.version }}
-          else
-            VERSION=${GITHUB_REF#refs/tags/v}
+        env:
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+        run: &release-metadata |
+          set -euo pipefail
+
+          VERSION=${RELEASE_INPUT_VERSION:-${GITHUB_REF#refs/tags/v}}
+
+          # Keep values safe for filenames, image tags, and GitHub's environment files.
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$ ]] || {
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          }
+          METADATA=$(jq -er '[.driver_id, .version] | @tsv' driver.json)
+          IFS=$'\t' read -r DRIVER_ID DRIVER_VERSION <<< "$METADATA"
+          [[ "$DRIVER_ID" =~ ^[[:alnum:]_-]+$ ]]
+          PROJECT_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [[ "$VERSION" != "$DRIVER_VERSION" || "$VERSION" != "$PROJECT_VERSION" ]]; then
+            echo "Release ($VERSION), driver.json ($DRIVER_VERSION), and pyproject.toml ($PROJECT_VERSION) must match." >&2
+            exit 1
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "DRIVER_ID=$(jq .driver_id -r driver.json)" >> $GITHUB_ENV
-          # Save to Github output to later use it in Create Release job
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "DRIVER_ID=$(jq .driver_id -r driver.json)" >> $GITHUB_OUTPUT
+
+          printf 'VERSION=%s\nDRIVER_ID=%s\n' "$VERSION" "$DRIVER_ID" | tee -a "$GITHUB_ENV" "$GITHUB_OUTPUT"
 
       - name: Build
         run: |
-          sudo apt-get update && sudo apt-get install -y qemu-system-arm binfmt-support qemu-user-static
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-          echo "Starting pyinstaller build"
-          docker run --rm --name builder \
-            --platform=aarch64 \
-            --user=$(id -u):$(id -g) \
-            -v ${GITHUB_WORKSPACE}:/workspace \
-            docker.io/unfoldedcircle/r2-pyinstaller:${PYTHON_VER} \
-            bash -c \
-            "cd /workspace && \
-              python -m pip install -r requirements.txt && \
-              python -m pip check && \
-              pyinstaller --clean --onedir --name intg-${DRIVER_ID} --collect-all zeroconf --collect-all playdirector --hidden-import pyremoteplay.takion_pb2 --collect-binaries Cryptodome --exclude-module pyremoteplay.gui --exclude-module pyremoteplay.gamepad intg-${INTG_NAME}/driver.py"
+          uv run --no-dev --group build pyinstaller --clean --onedir \
+            --name "intg-${DRIVER_ID}" \
+            --collect-all zeroconf \
+            --collect-all playdirector \
+            --hidden-import pyremoteplay.takion_pb2 \
+            --collect-binaries Cryptodome \
+            --exclude-module pyremoteplay.gui \
+            --exclude-module pyremoteplay.gamepad \
+            "intg-${INTG_NAME}/driver.py"
 
-      - name: Prepare artifacts
-        shell: bash
+      - name: Package release archive
         run: |
           mkdir -p artifacts/bin
-          mv dist/intg-${{ env.DRIVER_ID }}/* artifacts/bin
-          mv artifacts/bin/intg-${{ env.DRIVER_ID }} artifacts/bin/driver
+          cp -a "dist/intg-${DRIVER_ID}/." artifacts/bin/
+          mv "artifacts/bin/intg-${DRIVER_ID}" artifacts/bin/driver
           cp driver.json artifacts/
-          python3 -m pip download --no-deps --no-binary=:all: --dest artifacts/sources playdirector==0.4.0
-          python3 tools/package_sources.py artifacts --library-source artifacts/sources/playdirector-0.4.0.tar.gz
-          echo "ARTIFACT_NAME=uc-intg-${{ env.DRIVER_ID }}-${{ env.VERSION }}-aarch64" >> $GITHUB_ENV
-          
-      - name: Create upload artifact archive
-        shell: bash
-        run: | 
-          tar czvf ${{ env.ARTIFACT_NAME }}.tar.gz -C ${GITHUB_WORKSPACE}/artifacts .
-          ls -lah
-          
+          uv run --no-dev python tools/package_sources.py artifacts
+          ARTIFACT_NAME="uc-intg-${DRIVER_ID}-${VERSION}-aarch64"
+          tar czf "${ARTIFACT_NAME}.tar.gz" -C artifacts .
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v7
-        id: upload_artifact
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: ${{ env.ARTIFACT_NAME }}.tar.gz
           if-no-files-found: error
           retention-days: 3
-            
+
   docker:
     name: Build and Push Docker Image
     runs-on: ubuntu-24.04
-    needs: [build]
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Get version and id
+        env:
+          RELEASE_INPUT_VERSION: ${{ inputs.version }}
+        run: *release-metadata
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -117,7 +133,7 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/uc-intg-${{ env.INTG_NAME }}
           tags: |
             type=ref,event=tag
-            type=raw,value=${{ needs.build.outputs.version }}
+            type=raw,value=${{ env.VERSION }}
             type=raw,value=latest
 
       - name: Build and push Docker image
@@ -128,7 +144,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-            
+
   release:
     name: Create Release
     runs-on: ubuntu-24.04
@@ -141,9 +157,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Extract changelog for this version
-        id: changelog
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
-          VERSION=${{ needs.build.outputs.version }}
           # Extract the block between this version's heading and the next heading
           NOTES=$(awk "/^## v?${VERSION}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
           # Strip leading/trailing blank lines
@@ -163,20 +179,11 @@ jobs:
           merge-multiple: true
 
       - name: Create hash file
-        shell: bash
         working-directory: release-artifacts
         env:
           DRIVER_ID: ${{ needs.build.outputs.driver_id }}
         run: |
-          shopt -s nullglob
-          archives=(*.tar.gz)
-          if (( ${#archives[@]} == 0 )); then
-            echo "::error::No release archives were downloaded"
-            exit 1
-          fi
-          for filename in "${archives[@]}"; do
-            printf 'sha256  %s\n' "$(sha256sum "$filename")"
-          done > "$DRIVER_ID.hash"
+          sha256sum -- *.tar.gz | sed 's/^/sha256  /' > "${DRIVER_ID}.hash"
 
       - name: Create release
         uses: ncipollo/release-action@v1

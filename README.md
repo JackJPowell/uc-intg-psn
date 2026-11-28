@@ -49,3 +49,29 @@ services:
       - UC_INTEGRATION_HTTP_PORT=9090
     restart: unless-stopped
 ```
+
+## Development
+
+Install Python 3.14 and [uv](https://docs.astral.sh/uv/getting-started/installation/)
+0.13.10, then prepare the environment and optional local version-check hook:
+
+```shell
+uv sync
+bash setup.sh
+uv run python intg-psn/driver.py
+```
+
+The driver uses the existing `UC_CONFIG_HOME`, discovery settings, and HTTP port
+9090. Use a separate configuration directory and avoid running two copies on the
+same port. See [code guidelines](docs/code_guidelines.md) for checks and
+[release instructions](docs/releases.md) for builds.
+
+`pyproject.toml` defines dependencies and `uv.lock` records preferred versions for
+local development, CI, and Docker. Use `uv add LIBRARY` or `uv add --dev TOOL` to
+change dependencies and commit both files. Normal `uv sync` and `uv run` commands
+may refresh the lockfile; upgrade a compatible pin deliberately with
+`uv lock --upgrade-package PACKAGE`.
+
+Production images install runtime dependencies only, using `/opt/venv`. Keep
+`.python-version` and the Docker base images on the same Python version, and keep
+the CI and Docker uv versions in sync. Rebuild the image after dependency changes.

@@ -9,17 +9,6 @@ updates:
       day: "monday"
     open-pull-requests-limit: 5
 
-  # Docker and CI install from the requirements files directly.
-  - package-ecosystem: "pip"
-    directory: "/"
-    exclude-paths:
-      - "pyproject.toml"
-      - "uv.lock"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 5
-
   - package-ecosystem: "docker"
     directory: "/"
     schedule:

@@ -1,5 +1,5 @@
 #!/bin/bash
 
-cd /usr/src/app
-pip install --no-cache-dir -q -r requirements.txt
-python intg-psn/driver.py
+set -euo pipefail
+cd /app
+exec python -u intg-psn/driver.py "$@"

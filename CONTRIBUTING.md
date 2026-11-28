@@ -2,6 +2,18 @@
 
 First off, thanks for taking the time to contribute!
 
+Use Python 3.14 and uv 0.13.10. Run `uv sync` to install the runtime and
+development dependencies, then `bash setup.sh` once per clone to enable the local
+version-check hook. It checks release tags against `driver.json` and
+`pyproject.toml`. See [development setup](README.md#development),
+[code guidelines](docs/code_guidelines.md), and [release instructions](docs/releases.md).
+
+Declare dependency changes with `uv add LIBRARY` or `uv add --dev TOOL` and
+commit `pyproject.toml` and `uv.lock` together. Packaging-only tools belong in the
+`build` group (`uv add --group build TOOL`). Normal uv commands reconcile a stale
+lockfile automatically; newly published versions alone do not replace compatible
+pins. Use `uv lock --upgrade-package PACKAGE` for an intentional upgrade.
+
 Found a bug, typo, missing feature or a description that doesn't make sense or needs clarification?
 Great, please let us know!
 
