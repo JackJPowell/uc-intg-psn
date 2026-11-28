@@ -3,6 +3,6 @@ ucapi==0.7.0
 PSNAWP==3.0.3
 pyrate_limiter>=4.0.2,<5.0.0
 ucapi-framework==1.9.8
-packaging>=25.0
+packaging>=26.3
 playdirector==0.4.2
 aiohttp>=3.13.2
